@@ -35,6 +35,7 @@ pub struct Atom {
 
 /// Secondary structure classification
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(dead_code)]
 pub enum SecondaryStructure {
     Helix,
     Sheet,
@@ -81,19 +82,6 @@ impl Protein {
             .filter(|a| a.is_ca)
             .map(|a| (a.x * a.x + a.y * a.y + a.z * a.z).sqrt())
             .fold(0.0f64, f64::max)
-    }
-
-    /// Get ALL atoms with their residue and chain context
-    pub fn all_atoms(&self) -> Vec<(&Atom, &Residue, &Chain)> {
-        let mut atoms = Vec::new();
-        for chain in &self.chains {
-            for residue in &chain.residues {
-                for atom in &residue.atoms {
-                    atoms.push((atom, residue, chain));
-                }
-            }
-        }
-        atoms
     }
 
     /// Center the protein at the origin

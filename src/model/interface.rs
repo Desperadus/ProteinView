@@ -120,28 +120,6 @@ pub fn analyze_interface(protein: &Protein, cutoff: f64) -> InterfaceAnalysis {
 }
 
 impl InterfaceAnalysis {
-    /// Check whether a residue participates in an inter-chain interface.
-    pub fn is_interface_residue(&self, chain_idx: usize, residue_idx: usize) -> bool {
-        self.interface_residues.contains(&(chain_idx, residue_idx))
-    }
-
-    /// Get the chain ID for a given focus chain index.
-    /// Used by the color scheme to identify the focus chain by ID string.
-    pub fn focus_chain_id(&self, focus_chain: usize) -> String {
-        // We don't store the protein here, so caller must provide context.
-        // Return chain letter based on index (A, B, C...)
-        // This is overridden by the App which has the actual protein.
-        String::from((b'A' + focus_chain as u8) as char)
-    }
-
-    /// Convert interface residues to (chain_id, seq_num) pairs for color lookup.
-    /// Requires the protein to resolve indices to IDs/seq_nums.
-    pub fn interface_residues_by_id(&self) -> HashSet<(String, i32)> {
-        // This basic version maps chain_idx -> chain letter.
-        // The App will call the richer version with the protein reference.
-        HashSet::new()
-    }
-
     /// Convert interface residues to (chain_id, seq_num) pairs using the protein.
     pub fn interface_residues_by_id_with_protein(&self, protein: &Protein) -> HashSet<(String, i32)> {
         let mut set = HashSet::new();
@@ -328,10 +306,10 @@ mod tests {
         let protein = two_chain_protein();
         let analysis = analyze_interface(&protein, 4.5);
 
-        assert!(analysis.is_interface_residue(0, 0));
-        assert!(analysis.is_interface_residue(1, 0));
-        assert!(!analysis.is_interface_residue(0, 1));
-        assert!(!analysis.is_interface_residue(1, 1));
+        assert!(analysis.interface_residues.contains(&(0, 0)));
+        assert!(analysis.interface_residues.contains(&(1, 0)));
+        assert!(!analysis.interface_residues.contains(&(0, 1)));
+        assert!(!analysis.interface_residues.contains(&(1, 1)));
     }
 
     #[test]

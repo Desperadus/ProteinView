@@ -41,6 +41,7 @@ impl Framebuffer {
     }
 
     /// Reset the framebuffer to black pixels and infinite depth.
+    #[allow(dead_code)]
     pub fn clear(&mut self) {
         for c in self.color.iter_mut() {
             *c = [0, 0, 0];
@@ -68,13 +69,16 @@ impl Framebuffer {
     /// Shading: `intensity = max(ambient, dot(normal, light_dir))` where
     /// ambient = 0.15. Each color channel is scaled by the intensity.
     pub fn rasterize_triangle(&mut self, tri: &Triangle, light_dir: [f64; 3]) {
-        const AMBIENT: f64 = 0.15;
+        const AMBIENT: f64 = 0.45;
 
-        // --- Lambert shading intensity ---
+        // --- Two-sided Lambert shading with wrap lighting ---
+        // Use abs(dot) so back-facing triangles also get proper lighting,
+        // then apply a half-Lambert wrap to soften the falloff
         let dot = tri.normal[0] * light_dir[0]
             + tri.normal[1] * light_dir[1]
             + tri.normal[2] * light_dir[2];
-        let intensity = if dot > AMBIENT { dot } else { AMBIENT };
+        let half_lambert = dot.abs() * 0.5 + 0.5;
+        let intensity = AMBIENT + (1.0 - AMBIENT) * half_lambert;
 
         let shaded: [u8; 3] = [
             (tri.color[0] as f64 * intensity).min(255.0) as u8,
@@ -181,10 +185,7 @@ impl Framebuffer {
     }
 
     /// Draw a filled circle at pixel coordinates `(cx, cy)` with the given radius and color.
-    ///
-    /// Used for rendering atoms as dots in ball-and-stick mode.
-    /// No z-buffering on the circle itself (it writes at z = 0); callers should
-    /// provide screen-depth by using `draw_circle_z` if depth is needed.
+    #[allow(dead_code)]
     pub fn draw_circle(&mut self, cx: f64, cy: f64, radius: f64, color: [u8; 3]) {
         self.draw_circle_z(cx, cy, 0.0, radius, color);
     }

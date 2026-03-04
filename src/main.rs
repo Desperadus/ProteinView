@@ -81,6 +81,30 @@ fn main() -> Result<()> {
     loop {
         // Render
         terminal.draw(|frame| {
+            // If interface is active, split horizontally: sidebar | main
+            let main_area = if app.show_interface {
+                let horiz = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([
+                        Constraint::Length(ui::interface_panel::SIDEBAR_WIDTH),
+                        Constraint::Min(20),
+                    ])
+                    .split(frame.area());
+
+                let summary = app.interface_analysis.summary(&app.protein);
+                let chain_names = app.chain_names();
+                ui::interface_panel::render_interface_panel(
+                    frame,
+                    horiz[0],
+                    &summary,
+                    app.current_chain,
+                    &chain_names,
+                );
+                horiz[1]
+            } else {
+                frame.area()
+            };
+
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
@@ -89,7 +113,7 @@ fn main() -> Result<()> {
                     Constraint::Length(2),      // Status bar
                     Constraint::Length(1),      // Help bar
                 ])
-                .split(frame.area());
+                .split(main_area);
 
             ui::header::render_header(frame, chunks[0], &app.protein.name);
             ui::viewport::render_viewport(frame, chunks[1], &app);
@@ -98,17 +122,6 @@ fn main() -> Result<()> {
 
             if app.show_help {
                 ui::help_overlay::render_help_overlay(frame, frame.area());
-            }
-            if app.show_interface {
-                let summary = app.interface_analysis.summary(&app.protein);
-                let chain_names = app.chain_names();
-                ui::interface_panel::render_interface_panel(
-                    frame,
-                    frame.area(),
-                    &summary,
-                    app.current_chain,
-                    &chain_names,
-                );
             }
         })?;
 
