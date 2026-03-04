@@ -1,3 +1,4 @@
+use crate::model::interface::{analyze_interface, InterfaceAnalysis};
 use crate::model::protein::Protein;
 use crate::render::camera::Camera;
 use crate::render::color::{ColorScheme, ColorSchemeType};
@@ -37,6 +38,8 @@ pub struct App {
     pub current_chain: usize,
     pub hd_mode: bool,
     pub show_help: bool,
+    pub show_interface: bool,
+    pub interface_analysis: InterfaceAnalysis,
     pub should_quit: bool,
 }
 
@@ -46,18 +49,19 @@ impl App {
         let total_residues = protein.residue_count();
         let radius = protein.bounding_radius().max(1.0);
         // Dynamic zoom based on actual terminal size
-        // Viewport rows = total - 4 (header, status bar, help bar)
         let vp_rows = term_rows.saturating_sub(4) as f64;
         let vp_cols = term_cols as f64;
         let auto_zoom = if hd_mode {
-            // HD: 1 pixel per col, 2 pixels per row
             0.6 * vp_cols.min(vp_rows * 2.0) / (2.0 * radius)
         } else {
-            // Braille: 2 dots per col, 4 dots per row
             0.6 * (vp_cols * 2.0).min(vp_rows * 4.0) / (2.0 * radius)
         };
         let mut camera = Camera::default();
         camera.zoom = auto_zoom;
+
+        // Pre-compute interface analysis (4.5A cutoff)
+        let interface_analysis = analyze_interface(&protein, 4.5);
+
         Self {
             protein,
             camera,
@@ -66,6 +70,8 @@ impl App {
             current_chain: 0,
             hd_mode,
             show_help: false,
+            show_interface: false,
+            interface_analysis,
             should_quit: false,
         }
     }
@@ -79,9 +85,33 @@ impl App {
         self.viz_mode = self.viz_mode.next();
     }
 
+    fn rebuild_interface_colors(&mut self) {
+        self.color_scheme = ColorScheme::new_interface(
+            self.protein.residue_count(),
+            self.current_chain,
+            &self.interface_analysis,
+            &self.protein,
+        );
+    }
+
+    pub fn toggle_interface(&mut self) {
+        self.show_interface = !self.show_interface;
+        if self.show_interface {
+            self.rebuild_interface_colors();
+        } else {
+            self.color_scheme = ColorScheme::new(
+                ColorSchemeType::Structure,
+                self.protein.residue_count(),
+            );
+        }
+    }
+
     pub fn next_chain(&mut self) {
         if !self.protein.chains.is_empty() {
             self.current_chain = (self.current_chain + 1) % self.protein.chains.len();
+            if self.show_interface {
+                self.rebuild_interface_colors();
+            }
         }
     }
 
@@ -92,7 +122,14 @@ impl App {
             } else {
                 self.current_chain - 1
             };
+            if self.show_interface {
+                self.rebuild_interface_colors();
+            }
         }
+    }
+
+    pub fn chain_names(&self) -> Vec<String> {
+        self.protein.chains.iter().map(|c| c.id.clone()).collect()
     }
 
     pub fn tick(&mut self) {

@@ -1,4 +1,7 @@
+use std::collections::HashSet;
+
 use ratatui::style::Color;
+use crate::model::interface::InterfaceAnalysis;
 use crate::model::protein::{Atom, Chain, Residue, SecondaryStructure};
 
 /// Available color schemes
@@ -9,6 +12,7 @@ pub enum ColorSchemeType {
     Element,
     BFactor,
     Rainbow,
+    Interface,
 }
 
 impl ColorSchemeType {
@@ -19,6 +23,8 @@ impl ColorSchemeType {
             Self::Element => Self::BFactor,
             Self::BFactor => Self::Rainbow,
             Self::Rainbow => Self::Structure,
+            // Interface is toggled separately, skip it in the cycle
+            Self::Interface => Self::Structure,
         }
     }
 
@@ -29,6 +35,7 @@ impl ColorSchemeType {
             Self::Element => "Element",
             Self::BFactor => "B-Factor",
             Self::Rainbow => "Rainbow",
+            Self::Interface => "Interface",
         }
     }
 }
@@ -38,11 +45,37 @@ impl ColorSchemeType {
 pub struct ColorScheme {
     pub scheme_type: ColorSchemeType,
     total_residues: usize,
+    /// For Interface mode: chain ID of the "focus" (antibody) chain
+    focus_chain_id: String,
+    /// For Interface mode: set of (chain_id, seq_num) at the interface
+    interface_residues_by_id: HashSet<(String, i32)>,
 }
 
 impl ColorScheme {
     pub fn new(scheme_type: ColorSchemeType, total_residues: usize) -> Self {
-        Self { scheme_type, total_residues }
+        Self {
+            scheme_type,
+            total_residues,
+            focus_chain_id: String::new(),
+            interface_residues_by_id: HashSet::new(),
+        }
+    }
+
+    pub fn new_interface(
+        total_residues: usize,
+        focus_chain: usize,
+        analysis: &InterfaceAnalysis,
+        protein: &crate::model::protein::Protein,
+    ) -> Self {
+        let focus_chain_id = protein.chains.get(focus_chain)
+            .map(|c| c.id.clone())
+            .unwrap_or_default();
+        Self {
+            scheme_type: ColorSchemeType::Interface,
+            total_residues,
+            focus_chain_id,
+            interface_residues_by_id: analysis.interface_residues_by_id_with_protein(protein),
+        }
     }
 
     /// Get color for a residue based on current scheme
@@ -50,15 +83,14 @@ impl ColorScheme {
         match self.scheme_type {
             ColorSchemeType::Structure => self.structure_color(residue),
             ColorSchemeType::Chain => self.chain_color(chain),
-            ColorSchemeType::Element => Color::Rgb(144, 144, 144), // Default to carbon gray
+            ColorSchemeType::Element => Color::Rgb(144, 144, 144),
             ColorSchemeType::BFactor => self.bfactor_color(residue),
             ColorSchemeType::Rainbow => self.rainbow_color(residue),
+            ColorSchemeType::Interface => self.interface_color(residue, chain),
         }
     }
 
     /// Get color for an individual atom, respecting the current scheme.
-    /// When using Element coloring, colors vary by element type (CPK-like).
-    /// For other schemes, falls back to residue-level coloring.
     pub fn atom_color(&self, atom: &Atom, residue: &Residue, chain: &Chain) -> Color {
         match self.scheme_type {
             ColorSchemeType::Element => Self::element_color(atom),
@@ -66,52 +98,70 @@ impl ColorScheme {
         }
     }
 
+    /// Interface color scheme:
+    /// - Focus chain (antibody): green tones
+    ///   - Interface residues: bright green
+    ///   - Non-interface: dim green
+    /// - Other chains (antigen): orange tones
+    ///   - Interface residues: bright orange
+    ///   - Non-interface: dim gray-brown
+    fn interface_color(&self, residue: &Residue, chain: &Chain) -> Color {
+        let is_contact = self.interface_residues_by_id
+            .contains(&(chain.id.clone(), residue.seq_num));
+        let is_focus = chain.id == self.focus_chain_id;
+
+        match (is_focus, is_contact) {
+            (true, true) => Color::Rgb(0, 255, 100),    // Bright green — antibody interface
+            (true, false) => Color::Rgb(40, 100, 60),   // Dim green — antibody non-interface
+            (false, true) => Color::Rgb(255, 165, 0),   // Bright orange — antigen interface
+            (false, false) => Color::Rgb(100, 80, 60),  // Dim brown — antigen non-interface
+        }
+    }
+
     /// CPK-style element coloring
     fn element_color(atom: &Atom) -> Color {
         match atom.element.trim() {
-            "C" => Color::Rgb(144, 144, 144), // Gray
-            "N" => Color::Rgb(48, 80, 248),   // Blue
-            "O" => Color::Rgb(255, 13, 13),   // Red
-            "S" => Color::Rgb(255, 255, 48),  // Yellow
-            "H" => Color::Rgb(255, 255, 255), // White
-            "P" => Color::Rgb(255, 128, 0),   // Orange
-            "FE" | "Fe" => Color::Rgb(224, 102, 51), // Iron orange
-            _ => Color::Rgb(200, 200, 200),   // Light gray default
+            "C" => Color::Rgb(144, 144, 144),
+            "N" => Color::Rgb(48, 80, 248),
+            "O" => Color::Rgb(255, 13, 13),
+            "S" => Color::Rgb(255, 255, 48),
+            "H" => Color::Rgb(255, 255, 255),
+            "P" => Color::Rgb(255, 128, 0),
+            "FE" | "Fe" => Color::Rgb(224, 102, 51),
+            _ => Color::Rgb(200, 200, 200),
         }
     }
 
     fn structure_color(&self, residue: &Residue) -> Color {
         match residue.secondary_structure {
-            SecondaryStructure::Helix => Color::Rgb(255, 0, 128),   // Magenta-red
-            SecondaryStructure::Sheet => Color::Rgb(255, 200, 0),   // Gold
-            SecondaryStructure::Turn  => Color::Rgb(96, 128, 255),  // Pale blue
-            SecondaryStructure::Coil  => Color::Rgb(0, 204, 0),     // Green
+            SecondaryStructure::Helix => Color::Rgb(255, 0, 128),
+            SecondaryStructure::Sheet => Color::Rgb(255, 200, 0),
+            SecondaryStructure::Turn  => Color::Rgb(96, 128, 255),
+            SecondaryStructure::Coil  => Color::Rgb(0, 204, 0),
         }
     }
 
     fn chain_color(&self, chain: &Chain) -> Color {
         let chain_colors = [
-            Color::Rgb(0, 180, 255),   // Cyan
-            Color::Rgb(255, 100, 0),   // Orange
-            Color::Rgb(0, 220, 100),   // Green
-            Color::Rgb(255, 50, 150),  // Pink
-            Color::Rgb(180, 100, 255), // Purple
-            Color::Rgb(255, 220, 0),   // Yellow
-            Color::Rgb(0, 200, 200),   // Teal
-            Color::Rgb(255, 150, 150), // Salmon
+            Color::Rgb(0, 180, 255),
+            Color::Rgb(255, 100, 0),
+            Color::Rgb(0, 220, 100),
+            Color::Rgb(255, 50, 150),
+            Color::Rgb(180, 100, 255),
+            Color::Rgb(255, 220, 0),
+            Color::Rgb(0, 200, 200),
+            Color::Rgb(255, 150, 150),
         ];
         let idx = chain.id.bytes().next().unwrap_or(b'A') as usize % chain_colors.len();
         chain_colors[idx]
     }
 
     fn bfactor_color(&self, residue: &Residue) -> Color {
-        // Average B-factor of residue atoms, map to blue-red gradient
         let avg_b: f64 = if residue.atoms.is_empty() {
             0.0
         } else {
             residue.atoms.iter().map(|a| a.b_factor).sum::<f64>() / residue.atoms.len() as f64
         };
-        // Normalize: typical B-factors range 5-80
         let t = ((avg_b - 5.0) / 75.0).clamp(0.0, 1.0);
         let r = (t * 255.0) as u8;
         let b = ((1.0 - t) * 255.0) as u8;
@@ -121,7 +171,6 @@ impl ColorScheme {
     fn rainbow_color(&self, residue: &Residue) -> Color {
         if self.total_residues == 0 { return Color::White; }
         let t = residue.seq_num as f64 / self.total_residues as f64;
-        // HSV to RGB with hue 0-300 (blue to red)
         let hue = (1.0 - t) * 300.0;
         let (r, g, b) = hsv_to_rgb(hue, 1.0, 1.0);
         Color::Rgb(r, g, b)

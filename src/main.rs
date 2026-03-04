@@ -99,6 +99,17 @@ fn main() -> Result<()> {
             if app.show_help {
                 ui::help_overlay::render_help_overlay(frame, frame.area());
             }
+            if app.show_interface {
+                let summary = app.interface_analysis.summary(&app.protein);
+                let chain_names = app.chain_names();
+                ui::interface_panel::render_interface_panel(
+                    frame,
+                    frame.area(),
+                    &summary,
+                    app.current_chain,
+                    &chain_names,
+                );
+            }
         })?;
 
         if app.should_quit { break; }
@@ -126,6 +137,7 @@ fn main() -> Result<()> {
                 KeyCode::Char('[') => app.prev_chain(),
                 KeyCode::Char(']') => app.next_chain(),
                 KeyCode::Char(' ') => app.camera.auto_rotate = !app.camera.auto_rotate,
+                KeyCode::Char('f') => app.toggle_interface(),
                 KeyCode::Char('?') => app.show_help = !app.show_help,
                 KeyCode::Esc => { if app.show_help { app.show_help = false; } },
                 _ => {}
