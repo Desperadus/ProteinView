@@ -65,8 +65,9 @@ fn main() -> Result<()> {
         protein.atom_count(),
     );
 
-    // Create app
-    let mut app = App::new(protein, cli.hd);
+    // Create app with actual terminal dimensions for dynamic zoom
+    let (term_cols, term_rows) = crossterm::terminal::size().unwrap_or((80, 24));
+    let mut app = App::new(protein, cli.hd, term_cols, term_rows);
 
     // Setup terminal
     enable_raw_mode()?;

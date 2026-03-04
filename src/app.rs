@@ -41,15 +41,21 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(mut protein: Protein, hd_mode: bool) -> Self {
+    pub fn new(mut protein: Protein, hd_mode: bool, term_cols: u16, term_rows: u16) -> Self {
         protein.center();
         let total_residues = protein.residue_count();
         let radius = protein.bounding_radius().max(1.0);
-        // Auto-fit: zoom so the protein fills ~70% of viewport
-        // A typical terminal is ~80 chars wide → ~160 braille pixels
-        // We want the protein diameter to span ~70% of that
-        // HD mode has ~1 pixel per column vs braille's ~2, so needs less zoom
-        let auto_zoom = if hd_mode { 20.0 / radius } else { 50.0 / radius };
+        // Dynamic zoom based on actual terminal size
+        // Viewport rows = total - 4 (header, status bar, help bar)
+        let vp_rows = term_rows.saturating_sub(4) as f64;
+        let vp_cols = term_cols as f64;
+        let auto_zoom = if hd_mode {
+            // HD: 1 pixel per col, 2 pixels per row
+            0.6 * vp_cols.min(vp_rows * 2.0) / (2.0 * radius)
+        } else {
+            // Braille: 2 dots per col, 4 dots per row
+            0.6 * (vp_cols * 2.0).min(vp_rows * 4.0) / (2.0 * radius)
+        };
         let mut camera = Camera::default();
         camera.zoom = auto_zoom;
         Self {
