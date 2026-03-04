@@ -106,10 +106,10 @@ fn main() -> Result<()> {
         if let Some(key) = event::poll_event(tick_rate)? {
             match key.code {
                 KeyCode::Char('q') => app.should_quit = true,
-                KeyCode::Char('h') => app.camera.rotate_y(-1.0),
-                KeyCode::Char('l') => app.camera.rotate_y(1.0),
-                KeyCode::Char('j') => app.camera.rotate_x(1.0),
-                KeyCode::Char('k') => app.camera.rotate_x(-1.0),
+                KeyCode::Char('h') | KeyCode::Left => app.camera.rotate_y(-1.0),
+                KeyCode::Char('l') | KeyCode::Right => app.camera.rotate_y(1.0),
+                KeyCode::Char('j') | KeyCode::Down => app.camera.rotate_x(1.0),
+                KeyCode::Char('k') | KeyCode::Up => app.camera.rotate_x(-1.0),
                 KeyCode::Char('u') => app.camera.rotate_z(-1.0),
                 KeyCode::Char('i') => app.camera.rotate_z(1.0),
                 KeyCode::Char('+') | KeyCode::Char('=') => app.camera.zoom_in(),

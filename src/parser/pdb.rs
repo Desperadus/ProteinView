@@ -1,5 +1,6 @@
 use anyhow::Result;
 use crate::model::protein::{Protein, Chain, Residue, Atom, SecondaryStructure};
+use crate::model::secondary::assign_from_pdb_file;
 
 /// Load a protein structure from a PDB or mmCIF file
 pub fn load_structure(path: &str) -> Result<Protein> {
@@ -27,7 +28,7 @@ pub fn load_structure(path: &str) -> Result<Protein> {
                 name: residue.name().unwrap_or("UNK").to_string(),
                 seq_num: residue.serial_number() as i32,
                 atoms,
-                secondary_structure: SecondaryStructure::Coil, // TODO: assign from DSSP or PDB records
+                secondary_structure: SecondaryStructure::Coil,
             });
         }
         chains.push(Chain {
@@ -38,5 +39,10 @@ pub fn load_structure(path: &str) -> Result<Protein> {
 
     let name = pdb.identifier.as_deref().unwrap_or("Unknown").to_string();
 
-    Ok(Protein { name, chains })
+    let mut protein = Protein { name, chains };
+
+    // Assign secondary structure from HELIX/SHEET records in the PDB file
+    assign_from_pdb_file(&mut protein, path);
+
+    Ok(protein)
 }
