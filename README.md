@@ -48,8 +48,14 @@ Terminal protein structure viewer -- load, rotate, and explore PDB/CIF structure
 ## Installation
 
 ```bash
+# Basic install
 cargo install --path .
+
+# With RCSB PDB fetch support
+cargo install --path . --features fetch
 ```
+
+This builds the binary and places it in `~/.cargo/bin/`, which is already on your PATH if you installed Rust via [rustup](https://rustup.rs/). Then run `proteinview` from anywhere.
 
 ## Usage
 
