@@ -9,7 +9,7 @@
 //!
 //! The output mesh is in world space; the caller projects through the camera.
 
-use crate::model::protein::{Protein, SecondaryStructure};
+use crate::model::protein::{MoleculeType, Protein, SecondaryStructure};
 use crate::render::color::ColorScheme;
 
 // ---------------------------------------------------------------------------
@@ -340,7 +340,14 @@ pub fn generate_ribbon_mesh(
     let mut triangles: Vec<RibbonTriangle> = Vec::new();
 
     for chain in &protein.chains {
-        generate_chain_ribbon(chain, color_scheme, &mut triangles);
+        match chain.molecule_type {
+            MoleculeType::Protein => {
+                generate_chain_ribbon(chain, color_scheme, &mut triangles);
+            }
+            MoleculeType::RNA | MoleculeType::DNA => {
+                generate_nucleic_acid_ribbon(chain, color_scheme, &mut triangles);
+            }
+        }
     }
 
     triangles
@@ -367,7 +374,7 @@ fn generate_chain_ribbon(
         .residues
         .iter()
         .filter_map(|res| {
-            let ca = res.atoms.iter().find(|a| a.is_ca)?;
+            let ca = res.atoms.iter().find(|a| a.is_backbone)?;
             let color = color_to_rgb(color_scheme.residue_color(res, chain));
             Some(CaRecord {
                 pos: [ca.x, ca.y, ca.z],
@@ -575,4 +582,295 @@ fn generate_chain_ribbon(
         true,
         out,
     );
+}
+
+// ---------------------------------------------------------------------------
+// Nucleic acid (RNA/DNA) ribbon generation
+// ---------------------------------------------------------------------------
+
+/// Half-width and half-thickness for base slabs (Angstroms).
+const BASE_SLAB_HALF_WIDTH: f64 = 1.0;
+const BASE_SLAB_HALF_THICKNESS: f64 = 0.2;
+
+/// Pyrimidine ring atom names (C, U, T, DC, DT).
+const PYRIMIDINE_ATOMS: &[&str] = &["N1", "C2", "N3", "C4", "C5", "C6"];
+/// Purine ring atom names (A, G, DA, DG).
+const PURINE_ATOMS: &[&str] = &["N1", "C2", "N3", "C4", "C5", "C6", "N7", "C8", "N9"];
+
+/// Returns true if the residue name is a purine base.
+fn is_purine(name: &str) -> bool {
+    matches!(name, "A" | "DA" | "AMP" | "G" | "DG" | "GMP")
+}
+
+/// Generate nucleic acid cartoon ribbon for a single chain.
+///
+/// Produces:
+///   1. A backbone tube through C4' atoms (always coil cross-section).
+///   2. 3D base slabs extending from C1' toward the base ring centroid.
+fn generate_nucleic_acid_ribbon(
+    chain: &crate::model::protein::Chain,
+    color_scheme: &ColorScheme,
+    out: &mut Vec<RibbonTriangle>,
+) {
+    // ----- Part 1: backbone tube through C4' atoms -----
+
+    // Collect C4' positions and colors.
+    let c4_records: Vec<CaRecord> = chain
+        .residues
+        .iter()
+        .filter_map(|res| {
+            let c4 = res.atoms.iter().find(|a| a.name.trim() == "C4'")?;
+            let color = color_to_rgb(color_scheme.residue_color(res, chain));
+            Some(CaRecord {
+                pos: [c4.x, c4.y, c4.z],
+                ss: SecondaryStructure::Coil, // always coil for nucleic acids
+                color,
+            })
+        })
+        .collect();
+
+    let n = c4_records.len();
+    if n >= 2 {
+        // Build Catmull-Rom spline through C4' positions.
+        let mut spline_points: Vec<SplinePoint> = Vec::new();
+
+        for seg in 0..n - 1 {
+            let i0 = if seg == 0 { 0 } else { seg - 1 };
+            let i1 = seg;
+            let i2 = seg + 1;
+            let i3 = if seg + 2 >= n { n - 1 } else { seg + 2 };
+
+            let p0 = c4_records[i0].pos;
+            let p1 = c4_records[i1].pos;
+            let p2 = c4_records[i2].pos;
+            let p3 = c4_records[i3].pos;
+
+            let subdivs = if seg == n - 2 {
+                SPLINE_SUBDIVISIONS + 1
+            } else {
+                SPLINE_SUBDIVISIONS
+            };
+
+            for sub in 0..subdivs {
+                let t = sub as f64 / SPLINE_SUBDIVISIONS as f64;
+                let pos = catmull_rom(p0, p1, p2, p3, t);
+                let color = if t < 0.5 {
+                    c4_records[i1].color
+                } else {
+                    c4_records[i2].color
+                };
+
+                spline_points.push(SplinePoint {
+                    pos,
+                    tangent: [0.0, 0.0, 0.0],
+                    normal: [0.0, 1.0, 0.0],
+                    binormal: [0.0, 0.0, 1.0],
+                    ss: SecondaryStructure::Coil,
+                    color,
+                    arrow_t: None,
+                });
+            }
+        }
+
+        if spline_points.len() >= 2 {
+            // Compute tangents via finite differences.
+            let sp_len = spline_points.len();
+            for i in 0..sp_len {
+                let prev = if i == 0 { 0 } else { i - 1 };
+                let next = if i == sp_len - 1 { sp_len - 1 } else { i + 1 };
+                let t =
+                    v3_normalize(v3_sub(spline_points[next].pos, spline_points[prev].pos));
+                spline_points[i].tangent = t;
+            }
+
+            // Compute Frenet-Serret frames via parallel transport.
+            {
+                let t0 = spline_points[0].tangent;
+                let arbitrary = if t0[0].abs() < 0.9 {
+                    [1.0, 0.0, 0.0]
+                } else {
+                    [0.0, 1.0, 0.0]
+                };
+                let mut prev_normal = v3_normalize(v3_cross(t0, arbitrary));
+
+                for sp in spline_points.iter_mut() {
+                    let t = sp.tangent;
+                    let proj = v3_scale(t, v3_dot(prev_normal, t));
+                    let mut nr = v3_sub(prev_normal, proj);
+                    let nl = v3_len(nr);
+                    if nl < 1e-12 {
+                        let arb = if t[0].abs() < 0.9 {
+                            [1.0, 0.0, 0.0]
+                        } else {
+                            [0.0, 1.0, 0.0]
+                        };
+                        nr = v3_normalize(v3_cross(t, arb));
+                    } else {
+                        nr = v3_scale(nr, 1.0 / nl);
+                    }
+                    let b = v3_normalize(v3_cross(t, nr));
+                    sp.normal = nr;
+                    sp.binormal = b;
+                    prev_normal = nr;
+                }
+            }
+
+            // Build cross-sections and emit triangle strips.
+            let mut prev_ring = cross_section(&spline_points[0]);
+            for i in 1..spline_points.len() {
+                let curr_ring = cross_section(&spline_points[i]);
+                let color = spline_points[i].color;
+
+                // Ring size is always COIL_SEGMENTS for nucleic acids, but be safe.
+                if prev_ring.len() != curr_ring.len() {
+                    let target = prev_ring.len().max(curr_ring.len());
+                    prev_ring = resample_ring(&prev_ring, target);
+                    // curr_ring is consumed below so resample inline if needed.
+                    let cr = resample_ring(&curr_ring, target);
+                    emit_strip(&prev_ring, &cr, color, out);
+                    prev_ring = cr;
+                } else {
+                    emit_strip(&prev_ring, &curr_ring, color, out);
+                    prev_ring = curr_ring;
+                }
+            }
+
+            // Cap ends.
+            let first_ring = cross_section(&spline_points[0]);
+            emit_cap(
+                &first_ring,
+                spline_points[0].pos,
+                spline_points[0].color,
+                false,
+                out,
+            );
+
+            let last_ring = cross_section(spline_points.last().unwrap());
+            emit_cap(
+                &last_ring,
+                spline_points.last().unwrap().pos,
+                spline_points.last().unwrap().color,
+                true,
+                out,
+            );
+        }
+    }
+
+    // ----- Part 2: base slabs -----
+
+    for residue in &chain.residues {
+        // Find C1' atom.
+        let c1_prime = match residue.atoms.iter().find(|a| a.name.trim() == "C1'") {
+            Some(a) => [a.x, a.y, a.z],
+            None => continue,
+        };
+
+        // Determine which ring atoms to look for.
+        let ring_names: &[&str] = if is_purine(&residue.name) {
+            PURINE_ATOMS
+        } else {
+            PYRIMIDINE_ATOMS
+        };
+
+        // Collect found base ring atom positions.
+        let ring_positions: Vec<V3> = ring_names
+            .iter()
+            .filter_map(|&name| {
+                residue
+                    .atoms
+                    .iter()
+                    .find(|a| a.name.trim() == name)
+                    .map(|a| [a.x, a.y, a.z])
+            })
+            .collect();
+
+        if ring_positions.len() < 3 {
+            continue;
+        }
+
+        // Compute base ring centroid.
+        let count = ring_positions.len() as f64;
+        let centroid = ring_positions.iter().fold([0.0, 0.0, 0.0], |acc, p| {
+            [acc[0] + p[0] / count, acc[1] + p[1] / count, acc[2] + p[2] / count]
+        });
+
+        // Direction from C1' to centroid (long axis of slab).
+        let dir = v3_sub(centroid, c1_prime);
+        let dir_len = v3_len(dir);
+        if dir_len < 1e-6 {
+            continue;
+        }
+        let long_axis = v3_normalize(dir);
+
+        // Width axis: perpendicular to long axis and a reference up vector.
+        let up = [0.0, 1.0, 0.0];
+        let mut width_axis = v3_cross(long_axis, up);
+        if v3_len(width_axis) < 1e-6 {
+            // long_axis is nearly parallel to up; use alternative.
+            width_axis = v3_cross(long_axis, [1.0, 0.0, 0.0]);
+        }
+        width_axis = v3_normalize(width_axis);
+
+        // Thickness axis: perpendicular to both long and width.
+        let thick_axis = v3_normalize(v3_cross(long_axis, width_axis));
+
+        let color = color_to_rgb(color_scheme.residue_color(residue, chain));
+
+        // Build 8 corners of the slab box.
+        // The slab goes from C1' to centroid, with half-width and half-thickness
+        // offsets along the width and thickness axes.
+        let hw = BASE_SLAB_HALF_WIDTH;
+        let ht = BASE_SLAB_HALF_THICKNESS;
+        let w_off = v3_scale(width_axis, hw);
+        let t_off = v3_scale(thick_axis, ht);
+
+        // Front face (at C1') corners: top-left, top-right, bottom-right, bottom-left
+        let f_tl = v3_add(c1_prime, v3_add(w_off, t_off));
+        let f_tr = v3_add(c1_prime, v3_sub(t_off, w_off));
+        let f_br = v3_sub(c1_prime, v3_add(w_off, t_off));
+        let f_bl = v3_add(c1_prime, v3_sub(w_off, t_off));
+
+        // Back face (at centroid) corners
+        let b_tl = v3_add(centroid, v3_add(w_off, t_off));
+        let b_tr = v3_add(centroid, v3_sub(t_off, w_off));
+        let b_br = v3_sub(centroid, v3_add(w_off, t_off));
+        let b_bl = v3_add(centroid, v3_sub(w_off, t_off));
+
+        // Emit 6 faces x 2 triangles = 12 triangles.
+        // Front face (at C1')
+        emit_quad(f_tl, f_tr, f_br, f_bl, color, out);
+        // Back face (at centroid)
+        emit_quad(b_tr, b_tl, b_bl, b_br, color, out);
+        // Top face
+        emit_quad(f_tl, b_tl, b_tr, f_tr, color, out);
+        // Bottom face
+        emit_quad(f_bl, f_br, b_br, b_bl, color, out);
+        // Left face
+        emit_quad(f_tl, f_bl, b_bl, b_tl, color, out);
+        // Right face
+        emit_quad(f_tr, b_tr, b_br, f_br, color, out);
+    }
+}
+
+/// Emit two triangles for a quad face (v0, v1, v2, v3) with correct normals.
+fn emit_quad(
+    v0: V3,
+    v1: V3,
+    v2: V3,
+    v3: V3,
+    color: [u8; 3],
+    out: &mut Vec<RibbonTriangle>,
+) {
+    let n1 = triangle_normal(v0, v1, v2);
+    out.push(RibbonTriangle {
+        verts: [v0, v1, v2],
+        color,
+        normal: n1,
+    });
+    let n2 = triangle_normal(v0, v2, v3);
+    out.push(RibbonTriangle {
+        verts: [v0, v2, v3],
+        color,
+        normal: n2,
+    });
 }
