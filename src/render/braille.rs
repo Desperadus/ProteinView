@@ -2,7 +2,7 @@ use ratatui::symbols::Marker;
 use ratatui::widgets::canvas::{Canvas, Context, Line};
 
 use crate::app::VizMode;
-use crate::model::protein::Protein;
+use crate::model::protein::{MoleculeType, Protein};
 use crate::render::camera::Camera;
 use crate::render::color::ColorScheme;
 
@@ -145,19 +145,29 @@ fn render_wireframe(
             }
         }
 
-        // Inter-residue peptide bonds: C of residue i to N of residue i+1
+        // Inter-residue bonds: peptide (C->N) for proteins,
+        // phosphodiester (O3'->P) for nucleic acids
         for i in 0..(chain.residues.len().saturating_sub(1)) {
             let res_curr = &chain.residues[i];
             let res_next = &chain.residues[i + 1];
 
-            // Find C atom in current residue and N atom in next residue
-            let c_atom = res_curr.atoms.iter().find(|a| a.name.trim() == "C");
-            let n_atom = res_next.atoms.iter().find(|a| a.name.trim() == "N");
+            let (from_atom, to_atom) = match chain.molecule_type {
+                MoleculeType::RNA | MoleculeType::DNA => {
+                    let o3 = res_curr.atoms.iter().find(|a| a.name.trim() == "O3'");
+                    let p = res_next.atoms.iter().find(|a| a.name.trim() == "P");
+                    (o3, p)
+                }
+                MoleculeType::Protein => {
+                    let c = res_curr.atoms.iter().find(|a| a.name.trim() == "C");
+                    let n = res_next.atoms.iter().find(|a| a.name.trim() == "N");
+                    (c, n)
+                }
+            };
 
-            if let (Some(c), Some(n)) = (c_atom, n_atom) {
-                let p1 = camera.project(c.x, c.y, c.z);
-                let p2 = camera.project(n.x, n.y, n.z);
-                let color = color_scheme.atom_color(c, res_curr, chain);
+            if let (Some(a1), Some(a2)) = (from_atom, to_atom) {
+                let p1 = camera.project(a1.x, a1.y, a1.z);
+                let p2 = camera.project(a2.x, a2.y, a2.z);
+                let color = color_scheme.atom_color(a1, res_curr, chain);
                 draw_thick_line(ctx, p1.x, p1.y, p2.x, p2.y, color, &offsets);
             }
         }
