@@ -9,8 +9,8 @@
 //!
 //! The output mesh is in world space; the caller projects through the camera.
 
-use crate::model::protein::{MoleculeType, Protein, SecondaryStructure};
-use crate::render::color::ColorScheme;
+use crate::model::protein::{is_purine, MoleculeType, Protein, SecondaryStructure};
+use crate::render::color::{color_to_rgb, ColorScheme};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -95,17 +95,6 @@ fn v3_normalize(a: V3) -> V3 {
         [0.0, 1.0, 0.0] // fallback up vector
     } else {
         v3_scale(a, 1.0 / l)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Color conversion
-// ---------------------------------------------------------------------------
-
-fn color_to_rgb(color: ratatui::style::Color) -> [u8; 3] {
-    match color {
-        ratatui::style::Color::Rgb(r, g, b) => [r, g, b],
-        _ => [180, 180, 180],
     }
 }
 
@@ -364,6 +353,155 @@ struct CaRecord {
     color: [u8; 3],
 }
 
+// ---------------------------------------------------------------------------
+// Shared spline tube builder (used by nucleic acid backbone)
+// ---------------------------------------------------------------------------
+
+/// Build a smooth tube through a sequence of backbone positions.
+///
+/// This performs the standard pipeline:
+///   1. Catmull-Rom spline interpolation between control points
+///   2. Finite-difference tangent computation
+///   3. Parallel-transport Frenet frame propagation
+///   4. Cross-section extrusion and triangle strip emission
+///   5. End caps
+///
+/// The `arrow_t` field on every generated `SplinePoint` is set to `None`;
+/// arrowhead logic is protein-specific and lives in `generate_chain_ribbon`.
+fn build_spline_tube(records: &[CaRecord], out: &mut Vec<RibbonTriangle>) {
+    let n = records.len();
+    if n < 2 {
+        return;
+    }
+
+    // --- Step 1: Generate Catmull-Rom spline points ---
+    let mut spline_points: Vec<SplinePoint> = Vec::new();
+
+    for seg in 0..n - 1 {
+        let i0 = if seg == 0 { 0 } else { seg - 1 };
+        let i1 = seg;
+        let i2 = seg + 1;
+        let i3 = if seg + 2 >= n { n - 1 } else { seg + 2 };
+
+        let p0 = records[i0].pos;
+        let p1 = records[i1].pos;
+        let p2 = records[i2].pos;
+        let p3 = records[i3].pos;
+
+        let subdivs = if seg == n - 2 {
+            SPLINE_SUBDIVISIONS + 1
+        } else {
+            SPLINE_SUBDIVISIONS
+        };
+
+        for sub in 0..subdivs {
+            let t = sub as f64 / SPLINE_SUBDIVISIONS as f64;
+            let pos = catmull_rom(p0, p1, p2, p3, t);
+            let ss = if t < 0.5 { records[i1].ss } else { records[i2].ss };
+            let color = if t < 0.5 {
+                records[i1].color
+            } else {
+                records[i2].color
+            };
+
+            spline_points.push(SplinePoint {
+                pos,
+                tangent: [0.0, 0.0, 0.0],
+                normal: [0.0, 1.0, 0.0],
+                binormal: [0.0, 0.0, 1.0],
+                ss,
+                color,
+                arrow_t: None,
+            });
+        }
+    }
+
+    if spline_points.len() < 2 {
+        return;
+    }
+
+    // --- Step 2: Compute tangents via finite differences ---
+    let sp_len = spline_points.len();
+    for i in 0..sp_len {
+        let prev = if i == 0 { 0 } else { i - 1 };
+        let next = if i == sp_len - 1 { sp_len - 1 } else { i + 1 };
+        let t = v3_normalize(v3_sub(spline_points[next].pos, spline_points[prev].pos));
+        spline_points[i].tangent = t;
+    }
+
+    // --- Step 3: Compute Frenet-Serret frames via parallel transport ---
+    {
+        let t0 = spline_points[0].tangent;
+        let arbitrary = if t0[0].abs() < 0.9 {
+            [1.0, 0.0, 0.0]
+        } else {
+            [0.0, 1.0, 0.0]
+        };
+        let mut prev_normal = v3_normalize(v3_cross(t0, arbitrary));
+
+        for sp in spline_points.iter_mut() {
+            let t = sp.tangent;
+            let proj = v3_scale(t, v3_dot(prev_normal, t));
+            let mut nr = v3_sub(prev_normal, proj);
+            let nl = v3_len(nr);
+            if nl < 1e-12 {
+                let arb = if t[0].abs() < 0.9 {
+                    [1.0, 0.0, 0.0]
+                } else {
+                    [0.0, 1.0, 0.0]
+                };
+                nr = v3_normalize(v3_cross(t, arb));
+            } else {
+                nr = v3_scale(nr, 1.0 / nl);
+            }
+            let b = v3_normalize(v3_cross(t, nr));
+            sp.normal = nr;
+            sp.binormal = b;
+            prev_normal = nr;
+        }
+    }
+
+    // --- Step 4: Build cross-sections and emit triangle strips ---
+    let mut prev_ring = cross_section(&spline_points[0]);
+
+    for i in 1..spline_points.len() {
+        let mut curr_ring = cross_section(&spline_points[i]);
+        let color = spline_points[i].color;
+
+        if prev_ring.len() != curr_ring.len() {
+            let target = prev_ring.len().max(curr_ring.len());
+            if prev_ring.len() != target {
+                prev_ring = resample_ring(&prev_ring, target);
+            }
+            if curr_ring.len() != target {
+                curr_ring = resample_ring(&curr_ring, target);
+            }
+        }
+
+        emit_strip(&prev_ring, &curr_ring, color, out);
+        prev_ring = curr_ring;
+    }
+
+    // --- Step 5: Cap both ends ---
+    let first_ring = cross_section(&spline_points[0]);
+    emit_cap(
+        &first_ring,
+        spline_points[0].pos,
+        spline_points[0].color,
+        false,
+        out,
+    );
+
+    let last_ring = cross_section(spline_points.last().unwrap());
+    emit_cap(
+        &last_ring,
+        spline_points.last().unwrap().pos,
+        spline_points.last().unwrap().color,
+        true,
+        out,
+    );
+}
+
 fn generate_chain_ribbon(
     chain: &crate::model::protein::Chain,
     color_scheme: &ColorScheme,
@@ -597,11 +735,6 @@ const PYRIMIDINE_ATOMS: &[&str] = &["N1", "C2", "N3", "C4", "C5", "C6"];
 /// Purine ring atom names (A, G, DA, DG).
 const PURINE_ATOMS: &[&str] = &["N1", "C2", "N3", "C4", "C5", "C6", "N7", "C8", "N9"];
 
-/// Returns true if the residue name is a purine base.
-fn is_purine(name: &str) -> bool {
-    matches!(name, "A" | "DA" | "AMP" | "G" | "DG" | "GMP")
-}
-
 /// Generate nucleic acid cartoon ribbon for a single chain.
 ///
 /// Produces:
@@ -629,132 +762,8 @@ fn generate_nucleic_acid_ribbon(
         })
         .collect();
 
-    let n = c4_records.len();
-    if n >= 2 {
-        // Build Catmull-Rom spline through C4' positions.
-        let mut spline_points: Vec<SplinePoint> = Vec::new();
-
-        for seg in 0..n - 1 {
-            let i0 = if seg == 0 { 0 } else { seg - 1 };
-            let i1 = seg;
-            let i2 = seg + 1;
-            let i3 = if seg + 2 >= n { n - 1 } else { seg + 2 };
-
-            let p0 = c4_records[i0].pos;
-            let p1 = c4_records[i1].pos;
-            let p2 = c4_records[i2].pos;
-            let p3 = c4_records[i3].pos;
-
-            let subdivs = if seg == n - 2 {
-                SPLINE_SUBDIVISIONS + 1
-            } else {
-                SPLINE_SUBDIVISIONS
-            };
-
-            for sub in 0..subdivs {
-                let t = sub as f64 / SPLINE_SUBDIVISIONS as f64;
-                let pos = catmull_rom(p0, p1, p2, p3, t);
-                let color = if t < 0.5 {
-                    c4_records[i1].color
-                } else {
-                    c4_records[i2].color
-                };
-
-                spline_points.push(SplinePoint {
-                    pos,
-                    tangent: [0.0, 0.0, 0.0],
-                    normal: [0.0, 1.0, 0.0],
-                    binormal: [0.0, 0.0, 1.0],
-                    ss: SecondaryStructure::Coil,
-                    color,
-                    arrow_t: None,
-                });
-            }
-        }
-
-        if spline_points.len() >= 2 {
-            // Compute tangents via finite differences.
-            let sp_len = spline_points.len();
-            for i in 0..sp_len {
-                let prev = if i == 0 { 0 } else { i - 1 };
-                let next = if i == sp_len - 1 { sp_len - 1 } else { i + 1 };
-                let t =
-                    v3_normalize(v3_sub(spline_points[next].pos, spline_points[prev].pos));
-                spline_points[i].tangent = t;
-            }
-
-            // Compute Frenet-Serret frames via parallel transport.
-            {
-                let t0 = spline_points[0].tangent;
-                let arbitrary = if t0[0].abs() < 0.9 {
-                    [1.0, 0.0, 0.0]
-                } else {
-                    [0.0, 1.0, 0.0]
-                };
-                let mut prev_normal = v3_normalize(v3_cross(t0, arbitrary));
-
-                for sp in spline_points.iter_mut() {
-                    let t = sp.tangent;
-                    let proj = v3_scale(t, v3_dot(prev_normal, t));
-                    let mut nr = v3_sub(prev_normal, proj);
-                    let nl = v3_len(nr);
-                    if nl < 1e-12 {
-                        let arb = if t[0].abs() < 0.9 {
-                            [1.0, 0.0, 0.0]
-                        } else {
-                            [0.0, 1.0, 0.0]
-                        };
-                        nr = v3_normalize(v3_cross(t, arb));
-                    } else {
-                        nr = v3_scale(nr, 1.0 / nl);
-                    }
-                    let b = v3_normalize(v3_cross(t, nr));
-                    sp.normal = nr;
-                    sp.binormal = b;
-                    prev_normal = nr;
-                }
-            }
-
-            // Build cross-sections and emit triangle strips.
-            let mut prev_ring = cross_section(&spline_points[0]);
-            for i in 1..spline_points.len() {
-                let curr_ring = cross_section(&spline_points[i]);
-                let color = spline_points[i].color;
-
-                // Ring size is always COIL_SEGMENTS for nucleic acids, but be safe.
-                if prev_ring.len() != curr_ring.len() {
-                    let target = prev_ring.len().max(curr_ring.len());
-                    prev_ring = resample_ring(&prev_ring, target);
-                    // curr_ring is consumed below so resample inline if needed.
-                    let cr = resample_ring(&curr_ring, target);
-                    emit_strip(&prev_ring, &cr, color, out);
-                    prev_ring = cr;
-                } else {
-                    emit_strip(&prev_ring, &curr_ring, color, out);
-                    prev_ring = curr_ring;
-                }
-            }
-
-            // Cap ends.
-            let first_ring = cross_section(&spline_points[0]);
-            emit_cap(
-                &first_ring,
-                spline_points[0].pos,
-                spline_points[0].color,
-                false,
-                out,
-            );
-
-            let last_ring = cross_section(spline_points.last().unwrap());
-            emit_cap(
-                &last_ring,
-                spline_points.last().unwrap().pos,
-                spline_points.last().unwrap().color,
-                true,
-                out,
-            );
-        }
-    }
+    // Delegate spline interpolation, framing, and meshing to shared helper.
+    build_spline_tube(&c4_records, out);
 
     // ----- Part 2: base slabs -----
 

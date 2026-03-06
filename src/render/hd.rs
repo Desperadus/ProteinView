@@ -1,7 +1,7 @@
 use crate::app::VizMode;
 use crate::model::protein::{MoleculeType, Protein};
 use crate::render::camera::Camera;
-use crate::render::color::ColorScheme;
+use crate::render::color::{color_to_rgb, ColorScheme};
 use crate::render::framebuffer::{default_light_dir, Framebuffer, Triangle};
 use crate::render::ribbon::RibbonTriangle;
 
@@ -66,12 +66,6 @@ pub fn render_hd_framebuffer(
     fb
 }
 
-fn color_to_rgb(color: ratatui::style::Color) -> [u8; 3] {
-    match color {
-        ratatui::style::Color::Rgb(r, g, b) => [r, g, b],
-        _ => [180, 180, 180],
-    }
-}
 
 /// Apply the camera's rotation to a direction vector (no zoom/pan).
 fn rotate_normal(camera: &Camera, nx: f64, ny: f64, nz: f64) -> [f64; 3] {

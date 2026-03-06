@@ -1,9 +1,27 @@
 /// Classification of the polymer type for a chain.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum MoleculeType {
     Protein,
     RNA,
     DNA,
+}
+
+/// Standard RNA residue names.
+pub const RNA_RESIDUES: &[&str] = &["A", "U", "G", "C", "I", "AMP", "UMP", "GMP", "CMP"];
+
+/// Standard DNA residue names.
+pub const DNA_RESIDUES: &[&str] = &["DA", "DT", "DG", "DC", "DI", "T"];
+
+/// Returns true if the residue name is a nucleotide (RNA or DNA).
+#[allow(dead_code)]
+pub fn is_nucleotide(name: &str) -> bool {
+    RNA_RESIDUES.contains(&name) || DNA_RESIDUES.contains(&name)
+}
+
+/// Returns true if the residue name is a purine base (A, G, I and their variants).
+pub fn is_purine(name: &str) -> bool {
+    matches!(name, "A" | "DA" | "AMP" | "G" | "DG" | "GMP" | "I" | "DI")
 }
 
 /// A complete protein structure

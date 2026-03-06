@@ -1,5 +1,5 @@
 use anyhow::Result;
-use crate::model::protein::{Protein, Chain, MoleculeType, Residue, Atom, SecondaryStructure};
+use crate::model::protein::{Protein, Chain, MoleculeType, Residue, Atom, SecondaryStructure, RNA_RESIDUES, DNA_RESIDUES};
 use crate::model::secondary::{assign_from_pdb_file, assign_from_cif_file};
 
 /// Load a protein structure from a PDB or mmCIF file
@@ -68,12 +68,6 @@ pub fn load_structure(path: &str) -> Result<Protein> {
 
     Ok(protein)
 }
-
-/// Known RNA residue names.
-const RNA_RESIDUES: &[&str] = &["A", "U", "G", "C", "I", "AMP", "UMP", "GMP", "CMP"];
-
-/// Known DNA residue names.
-const DNA_RESIDUES: &[&str] = &["DA", "DT", "DG", "DC", "DI"];
 
 /// Classify a chain's molecule type from its residue names.
 ///
@@ -253,5 +247,31 @@ mod tests {
         let name = "CB";
         let is_backbone = name == "CA" || name == "C4'";
         assert!(!is_backbone);
+    }
+
+    #[test]
+    fn test_classify_chain_type_dna_thymine_only() {
+        // A chain with only "T" residues should be classified as DNA
+        let residues = vec![
+            Residue {
+                name: "T".to_string(),
+                seq_num: 1,
+                atoms: vec![],
+                secondary_structure: SecondaryStructure::Coil,
+            },
+            Residue {
+                name: "T".to_string(),
+                seq_num: 2,
+                atoms: vec![],
+                secondary_structure: SecondaryStructure::Coil,
+            },
+            Residue {
+                name: "T".to_string(),
+                seq_num: 3,
+                atoms: vec![],
+                secondary_structure: SecondaryStructure::Coil,
+            },
+        ];
+        assert_eq!(classify_chain_type(&residues), MoleculeType::DNA);
     }
 }

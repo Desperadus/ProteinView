@@ -182,19 +182,6 @@ impl ColorScheme {
     }
 }
 
-/// Returns true if the residue name corresponds to a nucleotide (RNA or DNA base).
-#[allow(dead_code)]
-pub fn is_nucleotide(name: &str) -> bool {
-    matches!(
-        name,
-        "A" | "DA" | "AMP"
-            | "U" | "UMP"
-            | "T" | "DT"
-            | "G" | "DG" | "GMP"
-            | "C" | "DC" | "CMP"
-    )
-}
-
 /// Returns a base-type color for nucleotide residues, or `None` for non-nucleotides.
 fn nucleotide_base_color(name: &str) -> Option<Color> {
     match name {
@@ -203,7 +190,18 @@ fn nucleotide_base_color(name: &str) -> Option<Color> {
         "T" | "DT"         => Some(Color::Rgb(60, 60, 220)),   // Thymine — blue
         "G" | "DG" | "GMP" => Some(Color::Rgb(60, 180, 60)),   // Guanine — green
         "C" | "DC" | "CMP" => Some(Color::Rgb(220, 200, 40)),  // Cytosine — yellow
+        "I" | "DI"         => Some(Color::Rgb(150, 100, 180)), // Inosine — purple
         _ => None,
+    }
+}
+
+/// Convert a ratatui `Color` to an `[u8; 3]` RGB triple.
+///
+/// Returns `[180, 180, 180]` (light gray) for non-RGB color variants.
+pub fn color_to_rgb(color: Color) -> [u8; 3] {
+    match color {
+        Color::Rgb(r, g, b) => [r, g, b],
+        _ => [180, 180, 180],
     }
 }
 
@@ -226,7 +224,7 @@ fn hsv_to_rgb(h: f64, s: f64, v: f64) -> (u8, u8, u8) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::protein::{Residue, SecondaryStructure};
+    use crate::model::protein::{is_nucleotide, Residue, SecondaryStructure};
 
     /// Build a minimal residue for testing color assignment.
     fn make_residue(name: &str, ss: SecondaryStructure) -> Residue {
@@ -323,6 +321,23 @@ mod tests {
             let r = make_residue(name, SecondaryStructure::Coil);
             assert_eq!(scheme.structure_color(&r), expected, "Cytosine variant {name}");
         }
+    }
+
+    #[test]
+    fn structure_color_inosine_variants() {
+        let scheme = ColorScheme::new(ColorSchemeType::Structure, 100);
+        let expected = Color::Rgb(150, 100, 180);
+
+        for name in &["I", "DI"] {
+            let r = make_residue(name, SecondaryStructure::Coil);
+            assert_eq!(scheme.structure_color(&r), expected, "Inosine variant {name}");
+        }
+    }
+
+    #[test]
+    fn is_nucleotide_inosine() {
+        assert!(is_nucleotide("I"), "I should be recognized as nucleotide");
+        assert!(is_nucleotide("DI"), "DI should be recognized as nucleotide");
     }
 
     // ---- structure_color: protein residues still get secondary-structure colors ----
