@@ -32,16 +32,6 @@ pub fn render_hd_framebuffer(
 
     match viz_mode {
         VizMode::Cartoon => {
-            let mut z_min = f64::INFINITY;
-            let mut z_max = f64::NEG_INFINITY;
-            for tri in mesh {
-                for vert in &tri.verts {
-                    let p = camera.project(vert[0], vert[1], vert[2]);
-                    let pz = p.z;
-                    if pz < z_min { z_min = pz; }
-                    if pz > z_max { z_max = pz; }
-                }
-            }
             for tri in mesh {
                 let v0 = camera.project(tri.verts[0][0], tri.verts[0][1], tri.verts[0][2]);
                 let v1 = camera.project(tri.verts[1][0], tri.verts[1][1], tri.verts[1][2]);
@@ -57,7 +47,7 @@ pub fn render_hd_framebuffer(
                     color: tri.color,
                     normal: rotated_normal,
                 };
-                fb.rasterize_triangle_depth(&screen_tri, light_dir, z_min, z_max, 0.25);
+                fb.rasterize_triangle_depth(&screen_tri, light_dir);
             }
         }
         VizMode::Backbone => {
@@ -67,6 +57,11 @@ pub fn render_hd_framebuffer(
             render_wireframe_fb(&mut fb, protein, camera, color_scheme, half_w, half_h);
         }
     }
+
+    // Post-pass: blend all rasterized pixels toward a cool blue-gray fog color
+    // based on their z-buffer depth.  This gives uniform depth cues across all
+    // rendering modes (triangles, lines, circles).
+    fb.apply_depth_tint([40, 50, 70], 0.35);
 
     fb
 }
@@ -113,7 +108,7 @@ fn render_backbone_fb(
     for chain in &protein.chains {
         let mut prev: Option<([f64; 3], [u8; 3])> = None;
         for residue in &chain.residues {
-            if let Some(ca) = residue.atoms.iter().find(|a| a.is_ca) {
+            if let Some(ca) = residue.atoms.iter().find(|a| a.is_backbone) {
                 let p = camera.project(ca.x, ca.y, ca.z);
                 let px = to_pixel(p.x, p.y, p.z, half_w, half_h);
                 let color = color_to_rgb(color_scheme.residue_color(residue, chain));

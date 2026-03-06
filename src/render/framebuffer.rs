@@ -70,27 +70,23 @@ impl Framebuffer {
     /// Shading: `intensity = max(ambient, dot(normal, light_dir))` where
     /// ambient = 0.15. Each color channel is scaled by the intensity.
     ///
-    /// Convenience wrapper around `rasterize_triangle_depth` with no fog.
+    /// Convenience wrapper around `rasterize_triangle_depth` for tests.
     #[cfg(test)]
     pub fn rasterize_triangle(&mut self, tri: &Triangle, light_dir: [f64; 3]) {
-        self.rasterize_triangle_depth(tri, light_dir, 0.0, 0.0, 0.0);
+        self.rasterize_triangle_depth(tri, light_dir);
     }
 
-    /// Rasterize a triangle with Lambert shading, z-buffering, and depth fog.
+    /// Rasterize a triangle with Lambert shading and z-buffering.
     ///
-    /// `depth_fog` controls how much brightness falls off with depth:
-    /// - 0.0 = no fog (identical to `rasterize_triangle`)
-    /// - 0.4 = moderate fog (background at 60% brightness of foreground)
+    /// `light_dir` should be a *unit* vector pointing toward the light source.
+    /// The triangle's `normal` is expected to be a unit vector as well.
     ///
-    /// `z_near` and `z_far` define the depth range for the fog mapping.
-    /// When `depth_fog` is 0.0, `z_near` and `z_far` are ignored.
+    /// Shading uses two-sided half-Lambert wrap lighting with an ambient term.
+    /// Depth fog is handled separately via [`apply_depth_tint`] as a post-pass.
     pub fn rasterize_triangle_depth(
         &mut self,
         tri: &Triangle,
         light_dir: [f64; 3],
-        z_near: f64,
-        z_far: f64,
-        depth_fog: f64,
     ) {
         const AMBIENT: f64 = 0.55;
 
@@ -103,15 +99,12 @@ impl Framebuffer {
         let half_lambert = dot.abs() * 0.4 + 0.6;
         let intensity = AMBIENT + (1.0 - AMBIENT) * half_lambert;
 
-        // Precompute base shaded color (before fog).
-        let base_r = (tri.color[0] as f64 * intensity).min(255.0);
-        let base_g = (tri.color[1] as f64 * intensity).min(255.0);
-        let base_b = (tri.color[2] as f64 * intensity).min(255.0);
-
-        // Depth fog range.
-        let use_fog = depth_fog > 0.0;
-        let z_range = z_far - z_near;
-        let z_range_valid = use_fog && z_range.abs() > 1e-6;
+        // Precompute flat shaded color.
+        let shaded: [u8; 3] = [
+            (tri.color[0] as f64 * intensity).min(255.0) as u8,
+            (tri.color[1] as f64 * intensity).min(255.0) as u8,
+            (tri.color[2] as f64 * intensity).min(255.0) as u8,
+        ];
 
         // --- Extract vertices ---
         let [v0, v1, v2] = tri.verts;
@@ -141,9 +134,6 @@ impl Framebuffer {
         }
         let inv_denom = 1.0 / denom;
 
-        // When fog is disabled, precompute the flat shaded color once.
-        let flat_shaded: [u8; 3] = [base_r as u8, base_g as u8, base_b as u8];
-
         // --- Rasterize pixels in bounding box ---
         for py in min_y..=max_y {
             let pf_y = py as f64 + 0.5; // pixel center
@@ -163,25 +153,53 @@ impl Framebuffer {
                 if u >= -1e-6 && v >= -1e-6 && w >= -1e-6 {
                     // Interpolate z
                     let z = u * v0[2] + v * v1[2] + w * v2[2];
-
-                    let color = if z_range_valid {
-                        // Map z to a fog brightness multiplier:
-                        // z_near -> 1.0 (full brightness)
-                        // z_far  -> (1.0 - depth_fog) (dimmed)
-                        let t = ((z - z_near) / z_range).clamp(0.0, 1.0);
-                        let brightness = 1.0 - depth_fog * t;
-                        [
-                            (base_r * brightness) as u8,
-                            (base_g * brightness) as u8,
-                            (base_b * brightness) as u8,
-                        ]
-                    } else {
-                        flat_shaded
-                    };
-
-                    self.set_pixel(px, py, z, color);
+                    self.set_pixel(px, py, z, shaded);
                 }
             }
+        }
+    }
+
+    /// Apply a depth-based color tint to all rasterized pixels in the framebuffer.
+    ///
+    /// This is a post-pass that runs after all geometry has been rasterized.
+    /// For each pixel with a valid depth (not `f64::INFINITY`), its color is
+    /// lerped toward `fog_color` based on how far it is from the camera:
+    ///
+    /// - Nearest pixels (z == z_min) keep their original color
+    /// - Farthest pixels (z == z_max) are blended most toward `fog_color`
+    /// - The `fog_strength` parameter (0.0..=1.0) controls the maximum blend
+    ///
+    /// Background pixels (depth == INFINITY) remain unchanged (black).
+    pub fn apply_depth_tint(&mut self, fog_color: [u8; 3], fog_strength: f64) {
+        // Find z_min and z_max across all valid (non-background) pixels.
+        let mut z_min = f64::INFINITY;
+        let mut z_max = f64::NEG_INFINITY;
+        for &d in &self.depth {
+            if d < f64::INFINITY {
+                if d < z_min { z_min = d; }
+                if d > z_max { z_max = d; }
+            }
+        }
+
+        // No valid pixels, or all at the same depth — nothing to tint.
+        let z_range = z_max - z_min;
+        if z_range.abs() < 1e-12 {
+            return;
+        }
+
+        let inv_range = 1.0 / z_range;
+
+        for i in 0..self.depth.len() {
+            let d = self.depth[i];
+            if d >= f64::INFINITY {
+                continue; // background pixel — leave black
+            }
+            let t = ((d - z_min) * inv_range).clamp(0.0, 1.0);
+            let blend = t * fog_strength;
+            let c = &mut self.color[i];
+            c[0] = (c[0] as f64 + (fog_color[0] as f64 - c[0] as f64) * blend) as u8;
+            c[1] = (c[1] as f64 + (fog_color[1] as f64 - c[1] as f64) * blend) as u8;
+            c[2] = (c[2] as f64 + (fog_color[2] as f64 - c[2] as f64) * blend) as u8;
         }
     }
 
@@ -800,5 +818,48 @@ mod tests {
         for &c in &q {
             assert!(c % 8 == 0 || c == 255, "channel {} not quantized", c);
         }
+    }
+
+    #[test]
+    fn test_apply_depth_tint_blends_colors() {
+        let mut fb = Framebuffer::new(4, 1);
+        // Place pixels at different depths: near (z=1) and far (z=10)
+        let near_color = [200, 100, 50];
+        let far_color = [200, 100, 50];
+        fb.color[0] = near_color;
+        fb.depth[0] = 1.0;
+        fb.color[1] = far_color;
+        fb.depth[1] = 10.0;
+        // Pixels 2 and 3 remain at INFINITY (background)
+
+        let fog = [40, 50, 70];
+        fb.apply_depth_tint(fog, 0.5);
+
+        // Near pixel (z=1, t=0.0) should stay unchanged
+        assert_eq!(fb.color[0], near_color, "nearest pixel should keep original color");
+
+        // Far pixel (z=10, t=1.0) should be blended halfway toward fog
+        // new = base + (fog - base) * 1.0 * 0.5
+        // R: 200 + (40 - 200) * 0.5 = 200 - 80 = 120
+        // G: 100 + (50 - 100) * 0.5 = 100 - 25 = 75
+        // B:  50 + (70 -  50) * 0.5 =  50 + 10 = 60
+        assert_eq!(fb.color[1], [120, 75, 60], "farthest pixel should blend toward fog");
+    }
+
+    #[test]
+    fn test_apply_depth_tint_skips_background() {
+        let mut fb = Framebuffer::new(4, 1);
+        // Set one valid pixel and leave others at INFINITY
+        fb.color[0] = [200, 100, 50];
+        fb.depth[0] = 5.0;
+        fb.color[1] = [180, 90, 40];
+        fb.depth[1] = 10.0;
+        // Pixels 2 and 3 are background (depth = INFINITY, color = [0,0,0])
+
+        fb.apply_depth_tint([40, 50, 70], 0.5);
+
+        // Background pixels must remain [0,0,0]
+        assert_eq!(fb.color[2], [0, 0, 0], "background pixel at index 2 should stay black");
+        assert_eq!(fb.color[3], [0, 0, 0], "background pixel at index 3 should stay black");
     }
 }
