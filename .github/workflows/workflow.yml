@@ -40,14 +40,16 @@ jobs:
     name: Build Linux wheels (${{ matrix.target }})
     needs: check-version
     if: needs.check-version.outputs.should_publish == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
     strategy:
       matrix:
-        target:
-          - x86_64
-          - aarch64
+        include:
+          - target: x86_64
+            runner: ubuntu-24.04
+          - target: aarch64
+            runner: ubuntu-24.04-arm64
     steps:
       - uses: actions/checkout@v4
 
