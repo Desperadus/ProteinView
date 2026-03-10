@@ -141,6 +141,7 @@ struct SplinePoint {
     tangent: V3,
     normal: V3,
     binormal: V3,
+    frame_hint: Option<V3>,
     ss: SecondaryStructure,
     color: [u8; 3],
     /// True when this point lies within the arrowhead region at the end of a
@@ -228,6 +229,7 @@ fn triangle_normal(v0: V3, v1: V3, v2: V3) -> V3 {
 #[derive(Clone, Copy)]
 struct SegmentSample {
     pos: V3,
+    frame_hint: Option<V3>,
     ss: SecondaryStructure,
     color: [u8; 3],
     arrow_t: Option<f64>,
@@ -287,6 +289,7 @@ fn append_spline_point(out: &mut Vec<SplinePoint>, sample: SegmentSample) {
         tangent: [0.0, 0.0, 0.0],
         normal: [0.0, 1.0, 0.0],
         binormal: [0.0, 0.0, 1.0],
+        frame_hint: sample.frame_hint,
         ss: sample.ss,
         color: sample.color,
         arrow_t: sample.arrow_t,
@@ -462,6 +465,91 @@ fn compute_frames(spline_points: &mut [SplinePoint]) {
         sp.binormal = binormal;
         prev_normal = normal;
     }
+
+    apply_sheet_frame_guides(spline_points);
+}
+
+fn project_perpendicular(vec: V3, tangent: V3) -> Option<V3> {
+    let projected = v3_sub(vec, v3_scale(tangent, v3_dot(vec, tangent)));
+    let len = v3_len(projected);
+    (len >= 1e-8).then(|| v3_scale(projected, 1.0 / len))
+}
+
+fn align_vector_sign(vec: V3, reference: V3) -> V3 {
+    if v3_dot(vec, reference) < 0.0 {
+        v3_scale(vec, -1.0)
+    } else {
+        vec
+    }
+}
+
+fn apply_sheet_frame_guides(spline_points: &mut [SplinePoint]) {
+    let mut i = 0;
+    while i < spline_points.len() {
+        if spline_points[i].ss != SecondaryStructure::Sheet {
+            i += 1;
+            continue;
+        }
+
+        let run_start = i;
+        while i < spline_points.len() && spline_points[i].ss == SecondaryStructure::Sheet {
+            i += 1;
+        }
+        let run_end = i;
+        let run_len = run_end - run_start;
+
+        let mut guided_binormals = vec![None; run_len];
+        for local_idx in 0..run_len {
+            let idx = run_start + local_idx;
+            let tangent = spline_points[idx].tangent;
+            let base = spline_points[idx].binormal;
+            let mut acc = [0.0; 3];
+            let mut count = 0usize;
+            let mut guide_ref: Option<V3> = None;
+
+            for neighbor_idx in idx.saturating_sub(2)..=(idx + 2).min(run_end - 1) {
+                let Some(hint) = spline_points[neighbor_idx].frame_hint else {
+                    continue;
+                };
+                let Some(projected) = project_perpendicular(hint, tangent) else {
+                    continue;
+                };
+                let aligned = if let Some(reference) = guide_ref {
+                    align_vector_sign(projected, reference)
+                } else {
+                    let seeded = align_vector_sign(projected, base);
+                    guide_ref = Some(seeded);
+                    seeded
+                };
+                acc = v3_add(acc, aligned);
+                count += 1;
+            }
+
+            if count > 0 {
+                guided_binormals[local_idx] = Some(v3_normalize(acc));
+            }
+        }
+
+        let mut prev_binormal = spline_points[run_start].binormal;
+        let mut prev_normal = spline_points[run_start].normal;
+        for (local_idx, maybe_guided) in guided_binormals.into_iter().enumerate() {
+            let idx = run_start + local_idx;
+            let tangent = spline_points[idx].tangent;
+            let transported = spline_points[idx].binormal;
+            let guided = maybe_guided
+                .map(|candidate| align_vector_sign(candidate, prev_binormal))
+                .unwrap_or(transported);
+            let blended = v3_normalize(v3_add(v3_scale(transported, 0.35), v3_scale(guided, 0.65)));
+            let final_binormal = align_vector_sign(blended, prev_binormal);
+            let final_normal =
+                align_vector_sign(v3_normalize(v3_cross(final_binormal, tangent)), prev_normal);
+
+            spline_points[idx].normal = final_normal;
+            spline_points[idx].binormal = final_binormal;
+            prev_binormal = final_binormal;
+            prev_normal = final_normal;
+        }
+    }
 }
 
 fn emit_spline_surface(
@@ -562,8 +650,33 @@ pub fn generate_ribbon_mesh_adaptive(
 /// C-alpha record extracted from a residue.
 struct CaRecord {
     pos: V3,
+    frame_hint: Option<V3>,
     ss: SecondaryStructure,
     color: [u8; 3],
+}
+
+fn atom_pos(residue: &crate::model::protein::Residue, name: &str) -> Option<V3> {
+    residue
+        .atoms
+        .iter()
+        .find(|atom| atom.name.trim() == name)
+        .map(|atom| [atom.x, atom.y, atom.z])
+}
+
+fn residue_frame_hint(residue: &crate::model::protein::Residue) -> Option<V3> {
+    let carbonyl = match (atom_pos(residue, "C"), atom_pos(residue, "O")) {
+        (Some(c), Some(o)) => Some(v3_sub(o, c)),
+        _ => None,
+    };
+    let ca_to_o = match (atom_pos(residue, "CA"), atom_pos(residue, "O")) {
+        (Some(ca), Some(o)) => Some(v3_sub(o, ca)),
+        _ => None,
+    };
+
+    carbonyl.or(ca_to_o).and_then(|hint| {
+        let len = v3_len(hint);
+        (len >= 1e-8).then(|| v3_scale(hint, 1.0 / len))
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -626,6 +739,7 @@ fn build_spline_tube(records: &[CaRecord], out: &mut Vec<RibbonTriangle>) {
                 tangent: [0.0, 0.0, 0.0],
                 normal: [0.0, 1.0, 0.0],
                 binormal: [0.0, 0.0, 1.0],
+                frame_hint: None,
                 ss,
                 color,
                 arrow_t: None,
@@ -637,46 +751,8 @@ fn build_spline_tube(records: &[CaRecord], out: &mut Vec<RibbonTriangle>) {
         return;
     }
 
-    // --- Step 2: Compute tangents via finite differences ---
-    let sp_len = spline_points.len();
-    for i in 0..sp_len {
-        let prev = if i == 0 { 0 } else { i - 1 };
-        let next = if i == sp_len - 1 { sp_len - 1 } else { i + 1 };
-        let t = v3_normalize(v3_sub(spline_points[next].pos, spline_points[prev].pos));
-        spline_points[i].tangent = t;
-    }
-
-    // --- Step 3: Compute Frenet-Serret frames via parallel transport ---
-    {
-        let t0 = spline_points[0].tangent;
-        let arbitrary = if t0[0].abs() < 0.9 {
-            [1.0, 0.0, 0.0]
-        } else {
-            [0.0, 1.0, 0.0]
-        };
-        let mut prev_normal = v3_normalize(v3_cross(t0, arbitrary));
-
-        for sp in spline_points.iter_mut() {
-            let t = sp.tangent;
-            let proj = v3_scale(t, v3_dot(prev_normal, t));
-            let mut nr = v3_sub(prev_normal, proj);
-            let nl = v3_len(nr);
-            if nl < 1e-12 {
-                let arb = if t[0].abs() < 0.9 {
-                    [1.0, 0.0, 0.0]
-                } else {
-                    [0.0, 1.0, 0.0]
-                };
-                nr = v3_normalize(v3_cross(t, arb));
-            } else {
-                nr = v3_scale(nr, 1.0 / nl);
-            }
-            let b = v3_normalize(v3_cross(t, nr));
-            sp.normal = nr;
-            sp.binormal = b;
-            prev_normal = nr;
-        }
-    }
+    // --- Step 2/3: Compute tangents and transported frames ---
+    compute_frames(&mut spline_points);
 
     // --- Step 4: Build cross-sections and emit triangle strips ---
     let mut prev_ring = cross_section(&spline_points[0]);
@@ -757,6 +833,7 @@ fn generate_chain_ribbon(
             let color = color_to_rgb(color_scheme.residue_color(res, chain));
             Some(CaRecord {
                 pos: [ca.x, ca.y, ca.z],
+                frame_hint: residue_frame_hint(res),
                 ss: res.secondary_structure,
                 color,
             })
@@ -864,6 +941,11 @@ fn generate_chain_ribbon(
                 tangent: [0.0, 0.0, 0.0], // computed below
                 normal: [0.0, 1.0, 0.0],
                 binormal: [0.0, 0.0, 1.0],
+                frame_hint: if t < 0.5 {
+                    cas[i1].frame_hint
+                } else {
+                    cas[i2].frame_hint
+                },
                 ss,
                 color,
                 arrow_t,
@@ -875,55 +957,8 @@ fn generate_chain_ribbon(
         return;
     }
 
-    // 4. Compute tangents via finite differences.
-    let sp_len = spline_points.len();
-    for i in 0..sp_len {
-        let prev = if i == 0 { 0 } else { i - 1 };
-        let next = if i == sp_len - 1 { sp_len - 1 } else { i + 1 };
-        let t = v3_normalize(v3_sub(spline_points[next].pos, spline_points[prev].pos));
-        spline_points[i].tangent = t;
-    }
-
-    // 5. Compute Frenet-Serret frames with a propagated reference normal to
-    //    avoid flipping.
-    //
-    //    We use the "parallel transport" variant: choose an initial normal
-    //    perpendicular to the first tangent, then propagate it along the curve
-    //    by projecting out the tangent component at each step.
-    {
-        // Choose initial normal perpendicular to first tangent.
-        let t0 = spline_points[0].tangent;
-        let arbitrary = if t0[0].abs() < 0.9 {
-            [1.0, 0.0, 0.0]
-        } else {
-            [0.0, 1.0, 0.0]
-        };
-        let mut prev_normal = v3_normalize(v3_cross(t0, arbitrary));
-
-        for sp in spline_points.iter_mut() {
-            let t = sp.tangent;
-            // Project previous normal onto plane perpendicular to current tangent.
-            let proj = v3_scale(t, v3_dot(prev_normal, t));
-            let mut n = v3_sub(prev_normal, proj);
-            let nl = v3_len(n);
-            if nl < 1e-12 {
-                // Degenerate: pick a new arbitrary normal.
-                let arb = if t[0].abs() < 0.9 {
-                    [1.0, 0.0, 0.0]
-                } else {
-                    [0.0, 1.0, 0.0]
-                };
-                n = v3_normalize(v3_cross(t, arb));
-            } else {
-                n = v3_scale(n, 1.0 / nl);
-            }
-            let b = v3_normalize(v3_cross(t, n));
-
-            sp.normal = n;
-            sp.binormal = b;
-            prev_normal = n;
-        }
-    }
+    // 4/5. Compute tangents and transported frames.
+    compute_frames(&mut spline_points);
 
     // 6. Build cross-sections and emit triangle strips.
     let mut prev_ring = cross_section(&spline_points[0]);
@@ -981,6 +1016,7 @@ fn generate_chain_ribbon_adaptive(
             let color = color_to_rgb(color_scheme.residue_color(res, chain));
             Some(CaRecord {
                 pos: [ca.x, ca.y, ca.z],
+                frame_hint: residue_frame_hint(res),
                 ss: res.secondary_structure,
                 color,
             })
@@ -1026,6 +1062,11 @@ fn generate_chain_ribbon_adaptive(
 
         let sample_at = |t: f64| SegmentSample {
             pos: catmull_rom(p0, p1, p2, p3, t),
+            frame_hint: if t < 0.5 {
+                cas[i1].frame_hint
+            } else {
+                cas[i2].frame_hint
+            },
             ss: if t < 0.5 { cas[i1].ss } else { cas[i2].ss },
             color: if t < 0.5 {
                 cas[i1].color
@@ -1089,6 +1130,7 @@ fn generate_nucleic_acid_ribbon(
             let color = color_to_rgb(color_scheme.residue_color(res, chain));
             Some(CaRecord {
                 pos: [c4.x, c4.y, c4.z],
+                frame_hint: None,
                 ss: SecondaryStructure::Coil, // always coil for nucleic acids
                 color,
             })
@@ -1212,4 +1254,100 @@ fn emit_quad(v0: V3, v1: V3, v2: V3, v3: V3, color: [u8; 3], out: &mut Vec<Ribbo
         color,
         normal: n2,
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::protein::{Atom, Residue};
+
+    #[test]
+    fn residue_frame_hint_prefers_carbonyl_direction() {
+        let residue = Residue {
+            name: "VAL".to_string(),
+            seq_num: 12,
+            atoms: vec![
+                Atom {
+                    name: "CA".to_string(),
+                    element: "C".to_string(),
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                    b_factor: 0.0,
+                    is_backbone: true,
+                },
+                Atom {
+                    name: "C".to_string(),
+                    element: "C".to_string(),
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                    b_factor: 0.0,
+                    is_backbone: false,
+                },
+                Atom {
+                    name: "O".to_string(),
+                    element: "O".to_string(),
+                    x: 1.0,
+                    y: 2.0,
+                    z: 0.0,
+                    b_factor: 0.0,
+                    is_backbone: false,
+                },
+            ],
+            secondary_structure: SecondaryStructure::Sheet,
+        };
+
+        let hint = residue_frame_hint(&residue).unwrap();
+        assert!((hint[0] - 0.0).abs() < 1e-6);
+        assert!((hint[1] - 1.0).abs() < 1e-6);
+        assert!((hint[2] - 0.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn compute_frames_keeps_sheet_guides_coherent_across_flipped_hints() {
+        let mut spline_points = vec![
+            SplinePoint {
+                pos: [0.0, 0.0, 0.0],
+                tangent: [0.0, 0.0, 0.0],
+                normal: [0.0, 1.0, 0.0],
+                binormal: [0.0, 0.0, 1.0],
+                frame_hint: Some([0.0, 1.0, 0.0]),
+                ss: SecondaryStructure::Sheet,
+                color: [255, 255, 255],
+                arrow_t: None,
+            },
+            SplinePoint {
+                pos: [1.0, 0.0, 0.0],
+                tangent: [0.0, 0.0, 0.0],
+                normal: [0.0, 1.0, 0.0],
+                binormal: [0.0, 0.0, 1.0],
+                frame_hint: Some([0.0, -1.0, 0.0]),
+                ss: SecondaryStructure::Sheet,
+                color: [255, 255, 255],
+                arrow_t: None,
+            },
+            SplinePoint {
+                pos: [2.0, 0.0, 0.0],
+                tangent: [0.0, 0.0, 0.0],
+                normal: [0.0, 1.0, 0.0],
+                binormal: [0.0, 0.0, 1.0],
+                frame_hint: Some([0.0, 1.0, 0.0]),
+                ss: SecondaryStructure::Sheet,
+                color: [255, 255, 255],
+                arrow_t: None,
+            },
+        ];
+
+        compute_frames(&mut spline_points);
+
+        for sp in &spline_points {
+            assert!(
+                sp.binormal[1].abs() > 0.6,
+                "expected sheet width axis to follow averaged guide"
+            );
+        }
+        assert!(v3_dot(spline_points[0].binormal, spline_points[1].binormal) > 0.95);
+        assert!(v3_dot(spline_points[1].binormal, spline_points[2].binormal) > 0.95);
+    }
 }
