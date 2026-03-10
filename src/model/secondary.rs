@@ -456,7 +456,20 @@ fn infer_chain_secondary_structure(
     residues: &[crate::model::protein::Residue],
 ) -> Vec<SecondaryStructure> {
     let mut assignments = vec![SecondaryStructure::Coil; residues.len()];
+    let torsions = compute_torsions(residues);
+    let hbonds = compute_hbond_map(residues);
 
+    assign_helices_from_hbonds(&mut assignments, &hbonds, &torsions);
+    assign_sheets_from_hbonds(&mut assignments, &hbonds, &torsions);
+    fill_single_residue_gaps(&mut assignments, &torsions, SecondaryStructure::Helix);
+    fill_single_residue_gaps(&mut assignments, &torsions, SecondaryStructure::Sheet);
+    retain_runs(&mut assignments, SecondaryStructure::Helix, 3);
+    retain_runs(&mut assignments, SecondaryStructure::Sheet, 2);
+    assignments
+}
+
+fn compute_torsions(residues: &[crate::model::protein::Residue]) -> Vec<Option<(f64, f64)>> {
+    let mut torsions = vec![None; residues.len()];
     for i in 1..residues.len().saturating_sub(1) {
         let c_prev = atom_pos(&residues[i - 1], "C");
         let n = atom_pos(&residues[i], "N");
@@ -471,17 +484,144 @@ fn infer_chain_secondary_structure(
 
         let phi = dihedral(c_prev, n, ca, c);
         let psi = dihedral(n, ca, c, n_next);
+        torsions[i] = Some((phi, psi));
+    }
+    torsions
+}
 
-        if is_helix_torsion(phi, psi) {
-            assignments[i] = SecondaryStructure::Helix;
-        } else if is_sheet_torsion(phi, psi) {
-            assignments[i] = SecondaryStructure::Sheet;
+fn compute_hbond_map(residues: &[crate::model::protein::Residue]) -> Vec<Vec<bool>> {
+    let n = residues.len();
+    let mut hbonds = vec![vec![false; n]; n];
+
+    let c_atoms: Vec<Option<[f64; 3]>> = residues.iter().map(|r| atom_pos(r, "C")).collect();
+    let o_atoms: Vec<Option<[f64; 3]>> = residues.iter().map(|r| atom_pos(r, "O")).collect();
+    let n_atoms: Vec<Option<[f64; 3]>> = residues.iter().map(|r| atom_pos(r, "N")).collect();
+    let ca_atoms: Vec<Option<[f64; 3]>> = residues.iter().map(|r| atom_pos(r, "CA")).collect();
+
+    for acceptor in 0..n {
+        let (Some(c), Some(o)) = (c_atoms[acceptor], o_atoms[acceptor]) else {
+            continue;
+        };
+
+        for donor in 0..n {
+            if donor == acceptor || donor.abs_diff(acceptor) <= 1 {
+                continue;
+            }
+
+            let (Some(n_atom), Some(ca_atom)) = (n_atoms[donor], ca_atoms[donor]) else {
+                continue;
+            };
+            let Some(h_atom) =
+                estimate_amide_h(&c_atoms, &n_atoms, &ca_atoms, donor, n_atom, ca_atom)
+            else {
+                continue;
+            };
+
+            let energy = hbond_energy(o, c, n_atom, h_atom);
+            if energy < -0.5 {
+                hbonds[acceptor][donor] = true;
+            }
         }
     }
 
-    retain_runs(&mut assignments, SecondaryStructure::Helix, 4);
-    retain_runs(&mut assignments, SecondaryStructure::Sheet, 3);
-    assignments
+    hbonds
+}
+
+fn estimate_amide_h(
+    c_atoms: &[Option<[f64; 3]>],
+    _n_atoms: &[Option<[f64; 3]>],
+    _ca_atoms: &[Option<[f64; 3]>],
+    donor: usize,
+    n_atom: [f64; 3],
+    ca_atom: [f64; 3],
+) -> Option<[f64; 3]> {
+    let prev_c = donor.checked_sub(1).and_then(|i| c_atoms[i])?;
+    let dir_prev = normalize(sub(n_atom, prev_c))?;
+    let dir_ca = normalize(sub(n_atom, ca_atom))?;
+    let bisector = normalize(add(dir_prev, dir_ca))?;
+    Some(add(n_atom, scale(bisector, 1.0)))
+}
+
+fn hbond_energy(o: [f64; 3], c: [f64; 3], n: [f64; 3], h: [f64; 3]) -> f64 {
+    let r_on = distance(o, n).max(0.5);
+    let r_ch = distance(c, h).max(0.5);
+    let r_oh = distance(o, h).max(0.5);
+    let r_cn = distance(c, n).max(0.5);
+    27.888 * (1.0 / r_on + 1.0 / r_ch - 1.0 / r_oh - 1.0 / r_cn)
+}
+
+fn assign_helices_from_hbonds(
+    assignments: &mut [SecondaryStructure],
+    hbonds: &[Vec<bool>],
+    torsions: &[Option<(f64, f64)>],
+) {
+    let mut support = vec![0usize; assignments.len()];
+
+    for turn in [4usize, 3, 5] {
+        for i in 0..assignments.len().saturating_sub(turn) {
+            if !hbonds[i][i + turn] {
+                continue;
+            }
+
+            let span = i + 1..=i + turn;
+            let compatible = span
+                .clone()
+                .filter(|&idx| torsions_match_target(torsions[idx], SecondaryStructure::Helix))
+                .count();
+            let span_len = turn;
+            if compatible * 2 < span_len {
+                continue;
+            }
+
+            for idx in span {
+                support[idx] += 1;
+            }
+        }
+    }
+
+    for (idx, state) in assignments.iter_mut().enumerate() {
+        if support[idx] > 0 {
+            *state = SecondaryStructure::Helix;
+        }
+    }
+}
+
+fn assign_sheets_from_hbonds(
+    assignments: &mut [SecondaryStructure],
+    hbonds: &[Vec<bool>],
+    torsions: &[Option<(f64, f64)>],
+) {
+    let mut support = vec![0usize; assignments.len()];
+    let n = assignments.len();
+
+    for i in 1..n.saturating_sub(1) {
+        for j in i + 2..n.saturating_sub(1) {
+            if !torsions_match_target(torsions[i], SecondaryStructure::Sheet)
+                || !torsions_match_target(torsions[j], SecondaryStructure::Sheet)
+            {
+                continue;
+            }
+
+            let antiparallel =
+                (hbonds[i][j] && hbonds[j][i]) || (hbonds[i - 1][j + 1] && hbonds[j - 1][i + 1]);
+            let parallel =
+                (hbonds[i - 1][j] && hbonds[j][i + 1]) || (hbonds[j - 1][i] && hbonds[i][j + 1]);
+
+            if antiparallel || parallel {
+                support[i] += 1;
+                support[j] += 1;
+            }
+        }
+    }
+
+    for idx in 0..n {
+        if assignments[idx] == SecondaryStructure::Coil
+            && support[idx] > 0
+            && torsions_match_target(torsions[idx], SecondaryStructure::Sheet)
+        {
+            assignments[idx] = SecondaryStructure::Sheet;
+        }
+    }
 }
 
 fn atom_pos(residue: &crate::model::protein::Residue, atom_name: &str) -> Option<[f64; 3]> {
@@ -494,6 +634,14 @@ fn atom_pos(residue: &crate::model::protein::Residue, atom_name: &str) -> Option
 
 fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
     [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+fn add(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
+}
+
+fn scale(v: [f64; 3], factor: f64) -> [f64; 3] {
+    [v[0] * factor, v[1] * factor, v[2] * factor]
 }
 
 fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
@@ -510,6 +658,10 @@ fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
 
 fn norm(v: [f64; 3]) -> f64 {
     dot(v, v).sqrt()
+}
+
+fn distance(a: [f64; 3], b: [f64; 3]) -> f64 {
+    norm(sub(a, b))
 }
 
 fn normalize(v: [f64; 3]) -> Option<[f64; 3]> {
@@ -543,13 +695,60 @@ fn dihedral(a: [f64; 3], b: [f64; 3], c: [f64; 3], d: [f64; 3]) -> f64 {
     dot(m1, n1_unit).atan2(dot(n0_unit, n1_unit)).to_degrees()
 }
 
-fn is_helix_torsion(phi: f64, psi: f64) -> bool {
+fn is_strong_helix_torsion(phi: f64, psi: f64) -> bool {
     (-140.0..=-80.0).contains(&phi) && (-170.0..=-100.0).contains(&psi)
 }
 
-fn is_sheet_torsion(phi: f64, psi: f64) -> bool {
+fn is_weak_helix_torsion(phi: f64, psi: f64) -> bool {
+    (-170.0..=-40.0).contains(&phi) && (-180.0..=-60.0).contains(&psi)
+}
+
+fn is_strong_sheet_torsion(phi: f64, psi: f64) -> bool {
     ((-100.0..=-40.0).contains(&phi) && (20.0..=90.0).contains(&psi))
         || ((80.0..=180.0).contains(&phi) && (120.0..=180.0).contains(&psi))
+}
+
+fn is_weak_sheet_torsion(phi: f64, psi: f64) -> bool {
+    ((-140.0..=-20.0).contains(&phi) && (0.0..=180.0).contains(&psi))
+        || ((60.0..=180.0).contains(&phi) && (90.0..=180.0).contains(&psi))
+}
+
+fn fill_single_residue_gaps(
+    assignments: &mut [SecondaryStructure],
+    torsions: &[Option<(f64, f64)>],
+    target: SecondaryStructure,
+) {
+    if assignments.len() < 3 {
+        return;
+    }
+
+    for i in 1..assignments.len() - 1 {
+        if assignments[i - 1] != target
+            || assignments[i] != SecondaryStructure::Coil
+            || assignments[i + 1] != target
+        {
+            continue;
+        }
+
+        if torsions_match_target(torsions[i], target) || torsions[i].is_none() {
+            assignments[i] = target;
+        }
+    }
+}
+
+fn torsions_match_target(torsions: Option<(f64, f64)>, target: SecondaryStructure) -> bool {
+    let Some((phi, psi)) = torsions else {
+        return false;
+    };
+    match target {
+        SecondaryStructure::Helix => {
+            is_strong_helix_torsion(phi, psi) || is_weak_helix_torsion(phi, psi)
+        }
+        SecondaryStructure::Sheet => {
+            is_strong_sheet_torsion(phi, psi) || is_weak_sheet_torsion(phi, psi)
+        }
+        _ => false,
+    }
 }
 
 fn retain_runs(assignments: &mut [SecondaryStructure], ss: SecondaryStructure, min_len: usize) {
