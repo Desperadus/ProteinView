@@ -1,9 +1,11 @@
 use crate::app::VizMode;
-use crate::model::protein::{MoleculeType, Protein};
+use crate::model::protein::{MoleculeType, Protein, is_ligand_residue};
 use crate::render::camera::Camera;
 use crate::render::color::{ColorScheme, color_to_rgb};
 use crate::render::framebuffer::{Framebuffer, Triangle, default_light_dir};
 use crate::render::ribbon::generate_ribbon_mesh_adaptive;
+
+const LIGAND_STICK_COLOR_RGB: [u8; 3] = [0, 255, 255];
 
 /// Render the protein into a raw [`Framebuffer`] at the given pixel dimensions.
 ///
@@ -50,12 +52,15 @@ pub fn render_hd_framebuffer(
                 });
             }
             fb.rasterize_triangles_tiled(&screen_tris, light_dir);
+            render_ligand_sticks_fb(&mut fb, protein, camera, half_w, half_h);
         }
         VizMode::Backbone => {
             render_backbone_fb(&mut fb, protein, camera, color_scheme, half_w, half_h);
+            render_ligand_sticks_fb(&mut fb, protein, camera, half_w, half_h);
         }
         VizMode::Wireframe => {
             render_wireframe_fb(&mut fb, protein, camera, color_scheme, half_w, half_h);
+            render_ligand_sticks_fb(&mut fb, protein, camera, half_w, half_h);
         }
     }
 
@@ -127,6 +132,9 @@ fn render_wireframe_fb(
 ) {
     for chain in &protein.chains {
         for residue in &chain.residues {
+            if is_ligand_residue(residue) {
+                continue;
+            }
             let projected: Vec<_> = residue
                 .atoms
                 .iter()
@@ -161,6 +169,9 @@ fn render_wireframe_fb(
         for i in 0..chain.residues.len().saturating_sub(1) {
             let res_curr = &chain.residues[i];
             let res_next = &chain.residues[i + 1];
+            if is_ligand_residue(res_curr) || is_ligand_residue(res_next) {
+                continue;
+            }
 
             let (from_atom, to_atom) = match chain.molecule_type {
                 MoleculeType::RNA | MoleculeType::DNA => {
@@ -182,6 +193,47 @@ fn render_wireframe_fb(
                 let px2 = to_pixel(p2.x, p2.y, p2.z, half_w, half_h);
                 let color = color_to_rgb(color_scheme.atom_color(a1, res_curr, chain));
                 fb.draw_thick_line_3d(px1, px2, color, 1.5);
+            }
+        }
+    }
+}
+
+/// Render ligands as cyan sticks across all visualization modes.
+fn render_ligand_sticks_fb(
+    fb: &mut Framebuffer,
+    protein: &Protein,
+    camera: &Camera,
+    half_w: f64,
+    half_h: f64,
+) {
+    for chain in &protein.chains {
+        for residue in &chain.residues {
+            if !is_ligand_residue(residue) {
+                continue;
+            }
+
+            let projected: Vec<_> = residue
+                .atoms
+                .iter()
+                .map(|a| {
+                    let p = camera.project(a.x, a.y, a.z);
+                    let px = to_pixel(p.x, p.y, p.z, half_w, half_h);
+                    (a, px)
+                })
+                .collect();
+
+            for (_, px) in &projected {
+                fb.draw_circle_z(px[0], px[1], px[2], 1.8, LIGAND_STICK_COLOR_RGB);
+            }
+
+            for i in 0..projected.len() {
+                for j in (i + 1)..projected.len() {
+                    let (a1, p1) = &projected[i];
+                    let (a2, p2) = &projected[j];
+                    if atoms_bonded_3d(a1.x, a1.y, a1.z, a2.x, a2.y, a2.z) {
+                        fb.draw_thick_line_3d(*p1, *p2, LIGAND_STICK_COLOR_RGB, 1.8);
+                    }
+                }
             }
         }
     }

@@ -12,6 +12,13 @@ pub const RNA_RESIDUES: &[&str] = &["A", "U", "G", "C", "I", "AMP", "UMP", "GMP"
 
 /// Standard DNA residue names.
 pub const DNA_RESIDUES: &[&str] = &["DA", "DT", "DG", "DC", "DI", "T"];
+/// Standard amino-acid residue names (including common ambiguous/special forms).
+pub const AMINO_ACID_RESIDUES: &[&str] = &[
+    "ALA", "ARG", "ASN", "ASP", "ASX", "CYS", "GLN", "GLU", "GLX", "GLY", "HIS", "ILE", "LEU",
+    "LYS", "MET", "PHE", "PRO", "PYL", "SEC", "SER", "THR", "TRP", "TYR", "VAL",
+];
+/// Common water residue names to exclude from ligand rendering.
+pub const WATER_RESIDUES: &[&str] = &["HOH", "WAT", "H2O", "DOD"];
 
 /// Returns true if the residue name is a nucleotide (RNA or DNA).
 #[allow(dead_code)]
@@ -22,6 +29,28 @@ pub fn is_nucleotide(name: &str) -> bool {
 /// Returns true if the residue name is a purine base (A, G, I and their variants).
 pub fn is_purine(name: &str) -> bool {
     matches!(name, "A" | "DA" | "AMP" | "G" | "DG" | "GMP" | "I" | "DI")
+}
+
+/// Returns true if the residue name is a standard amino acid code.
+pub fn is_amino_acid(name: &str) -> bool {
+    AMINO_ACID_RESIDUES.contains(&name)
+}
+
+/// Returns true if the residue should be treated as solvent/water.
+pub fn is_water(name: &str) -> bool {
+    WATER_RESIDUES.contains(&name)
+}
+
+/// Returns true if the residue should be rendered as ligand.
+///
+/// Ligands are non-water, non-polymer residues that do not look like
+/// amino-acid or nucleotide residues.
+pub fn is_ligand_residue(residue: &Residue) -> bool {
+    let name = residue.name.trim();
+    if is_water(name) || is_amino_acid(name) || is_nucleotide(name) {
+        return false;
+    }
+    !residue.atoms.is_empty()
 }
 
 /// A complete protein structure
@@ -202,5 +231,34 @@ mod tests {
     fn rejects_typical_experimental_bfactors() {
         let protein = protein_from_bfactors(&[12.0, 18.0, 22.0, 30.0, 16.0, 25.0]);
         assert!(!protein.has_plddt());
+    }
+
+    #[test]
+    fn detects_ligand_residue_from_name() {
+        let residue = Residue {
+            name: "LIG".to_string(),
+            seq_num: 1,
+            atoms: vec![atom_with_bfactor(0.0)],
+            secondary_structure: SecondaryStructure::Coil,
+        };
+        assert!(is_ligand_residue(&residue));
+    }
+
+    #[test]
+    fn excludes_amino_acids_and_water_from_ligands() {
+        let aa = Residue {
+            name: "ALA".to_string(),
+            seq_num: 1,
+            atoms: vec![atom_with_bfactor(0.0)],
+            secondary_structure: SecondaryStructure::Coil,
+        };
+        let water = Residue {
+            name: "HOH".to_string(),
+            seq_num: 2,
+            atoms: vec![atom_with_bfactor(0.0)],
+            secondary_structure: SecondaryStructure::Coil,
+        };
+        assert!(!is_ligand_residue(&aa));
+        assert!(!is_ligand_residue(&water));
     }
 }
