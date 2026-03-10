@@ -3,9 +3,7 @@ name: CI/CD
 on:
   push:
     branches:
-      - main
-    paths:
-      - "Cargo.toml"
+      - "**"
   workflow_dispatch:
 
 jobs:
@@ -39,7 +37,7 @@ jobs:
   build-linux-wheels:
     name: Build Linux wheels (x86_64)
     needs: check-version
-    if: needs.check-version.outputs.should_publish == 'true'
+    if: needs.check-version.outputs.should_publish == 'true' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -66,13 +64,13 @@ jobs:
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-linux-${{ matrix.target }}
+          name: wheels-linux-x86_64
           path: dist
 
   publish:
     name: Publish to PyPI
     needs: [check-version, build-linux-wheels]
-    if: needs.check-version.outputs.should_publish == 'true'
+    if: needs.check-version.outputs.should_publish == 'true' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
