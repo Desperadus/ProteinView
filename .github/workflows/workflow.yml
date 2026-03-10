@@ -37,7 +37,7 @@ jobs:
   build-linux-wheels:
     name: Build Linux wheels (x86_64)
     needs: check-version
-    if: needs.check-version.outputs.should_publish == 'true' && github.ref == 'refs/heads/main'
+    if: needs.check-version.outputs.should_publish == 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -70,7 +70,7 @@ jobs:
   publish:
     name: Publish to PyPI
     needs: [check-version, build-linux-wheels]
-    if: needs.check-version.outputs.should_publish == 'true' && github.ref == 'refs/heads/main'
+    if: needs.check-version.outputs.should_publish == 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
