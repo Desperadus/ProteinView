@@ -73,7 +73,7 @@ impl Camera {
         let dt = now.duration_since(self.last_tick).as_secs_f64();
         self.last_tick = now;
         if self.auto_rotate {
-            self.apply_local_rotation([0.0, 1.0, 0.0], Self::AUTO_ROTATE_SPEED * dt);
+            self.apply_local_rotation([0.0, 1.0, 0.0], -Self::AUTO_ROTATE_SPEED * dt);
         }
     }
 
@@ -93,7 +93,8 @@ impl Camera {
 
         // Apply zoom and pan (orthographic projection)
         Projected {
-            x: x_view * self.zoom + self.pan_x,
+            // Flip screen-space X so the rendered scene is not mirrored.
+            x: -x_view * self.zoom + self.pan_x,
             y: y_view * self.zoom + self.pan_y,
             z: z_view,
         }
@@ -181,7 +182,7 @@ mod tests {
         camera.set_pivot([5.0, 0.0, 0.0]);
 
         let projected = camera.project(6.0, 0.0, 0.0);
-        assert!((projected.x - 1.0).abs() < 1e-9);
+        assert!((projected.x + 1.0).abs() < 1e-9);
         assert!(projected.y.abs() < 1e-9);
     }
 }

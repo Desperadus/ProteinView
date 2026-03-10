@@ -25,11 +25,11 @@ pub fn render_help_overlay(frame: &mut Frame, area: Rect) {
         Line::from(""),
         Line::from(vec![
             Span::styled("  h / l      ", Style::default().fg(Color::Yellow)),
-            Span::raw("Rotate Y-axis (left/right swapped)"),
+            Span::raw("Rotate Y-axis"),
         ]),
         Line::from(vec![
             Span::styled("  j / k      ", Style::default().fg(Color::Yellow)),
-            Span::raw("Rotate X-axis (up/down swapped)"),
+            Span::raw("Rotate X-axis"),
         ]),
         Line::from(vec![
             Span::styled("  u / i      ", Style::default().fg(Color::Yellow)),
@@ -37,7 +37,7 @@ pub fn render_help_overlay(frame: &mut Frame, area: Rect) {
         ]),
         Line::from(vec![
             Span::styled("  Shift+N    ", Style::default().fg(Color::Yellow)),
-            Span::raw("Swap left/right and up/down rotation controls"),
+            Span::raw("Invert rotation controls"),
         ]),
         Line::from(vec![
             Span::styled("  + / -      ", Style::default().fg(Color::Yellow)),
