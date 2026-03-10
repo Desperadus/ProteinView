@@ -36,10 +36,6 @@ pub fn render_help_overlay(frame: &mut Frame, area: Rect) {
             Span::raw("Rotate Z-axis (roll)"),
         ]),
         Line::from(vec![
-            Span::styled("  Shift+N    ", Style::default().fg(Color::Yellow)),
-            Span::raw("Invert rotation controls"),
-        ]),
-        Line::from(vec![
             Span::styled("  + / -      ", Style::default().fg(Color::Yellow)),
             Span::raw("Zoom in / out"),
         ]),
