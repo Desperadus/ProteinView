@@ -89,7 +89,8 @@ impl Protein {
 
     /// Get total atom count
     pub fn atom_count(&self) -> usize {
-        self.chains.iter()
+        self.chains
+            .iter()
             .flat_map(|c| &c.residues)
             .flat_map(|r| &r.atoms)
             .count()
@@ -97,14 +98,13 @@ impl Protein {
 
     /// Get total residue count
     pub fn residue_count(&self) -> usize {
-        self.chains.iter()
-            .flat_map(|c| &c.residues)
-            .count()
+        self.chains.iter().flat_map(|c| &c.residues).count()
     }
 
     /// Get the bounding radius from origin (call after centering)
     pub fn bounding_radius(&self) -> f64 {
-        self.chains.iter()
+        self.chains
+            .iter()
             .flat_map(|c| &c.residues)
             .flat_map(|r| &r.atoms)
             .filter(|a| a.is_backbone)
@@ -114,12 +114,16 @@ impl Protein {
 
     /// Center the protein at the origin
     pub fn center(&mut self) {
-        let atoms: Vec<&Atom> = self.chains.iter()
+        let atoms: Vec<&Atom> = self
+            .chains
+            .iter()
             .flat_map(|c| &c.residues)
             .flat_map(|r| &r.atoms)
             .collect();
 
-        if atoms.is_empty() { return; }
+        if atoms.is_empty() {
+            return;
+        }
 
         let n = atoms.len() as f64;
         let cx: f64 = atoms.iter().map(|a| a.x).sum::<f64>() / n;

@@ -1,8 +1,8 @@
 use crate::app::VizMode;
 use crate::model::protein::{MoleculeType, Protein};
 use crate::render::camera::Camera;
-use crate::render::color::{color_to_rgb, ColorScheme};
-use crate::render::framebuffer::{default_light_dir, Framebuffer, Triangle};
+use crate::render::color::{ColorScheme, color_to_rgb};
+use crate::render::framebuffer::{Framebuffer, Triangle, default_light_dir};
 use crate::render::ribbon::RibbonTriangle;
 
 /// Render the protein into a raw [`Framebuffer`] at the given pixel dimensions.
@@ -66,22 +66,9 @@ pub fn render_hd_framebuffer(
     fb
 }
 
-
 /// Apply the camera's rotation to a direction vector (no zoom/pan).
 fn rotate_normal(camera: &Camera, nx: f64, ny: f64, nz: f64) -> [f64; 3] {
-    let (sin_x, cos_x) = camera.rot_x.sin_cos();
-    let y1 = ny * cos_x - nz * sin_x;
-    let z1 = ny * sin_x + nz * cos_x;
-
-    let (sin_y, cos_y) = camera.rot_y.sin_cos();
-    let x2 = nx * cos_y + z1 * sin_y;
-    let z2 = -nx * sin_y + z1 * cos_y;
-
-    let (sin_z, cos_z) = camera.rot_z.sin_cos();
-    let x3 = x2 * cos_z - y1 * sin_z;
-    let y3 = x2 * sin_z + y1 * cos_z;
-
-    [x3, y3, z2]
+    camera.rotate_vector(nx, ny, nz)
 }
 
 /// Convert projected coords (centered at origin) to pixel coords (top-left origin).
@@ -116,14 +103,7 @@ fn render_backbone_fb(
     }
 }
 
-fn atoms_bonded_3d(
-    a1_x: f64,
-    a1_y: f64,
-    a1_z: f64,
-    a2_x: f64,
-    a2_y: f64,
-    a2_z: f64,
-) -> bool {
+fn atoms_bonded_3d(a1_x: f64, a1_y: f64, a1_z: f64, a2_x: f64, a2_y: f64, a2_z: f64) -> bool {
     let dx = a2_x - a1_x;
     let dy = a2_y - a1_y;
     let dz = a2_z - a1_z;

@@ -248,7 +248,9 @@ fn parse_cif_ss_records(file_path: &str) -> Vec<SSRange> {
             }
 
             ParseState::StructConfData => {
-                if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with("loop_")
+                if trimmed.is_empty()
+                    || trimmed.starts_with('#')
+                    || trimmed.starts_with("loop_")
                     || trimmed.starts_with('_')
                 {
                     state = ParseState::Scanning;
@@ -279,7 +281,9 @@ fn parse_cif_ss_records(file_path: &str) -> Vec<SSRange> {
             }
 
             ParseState::SheetRangeData => {
-                if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with("loop_")
+                if trimmed.is_empty()
+                    || trimmed.starts_with('#')
+                    || trimmed.starts_with("loop_")
                     || trimmed.starts_with('_')
                 {
                     state = ParseState::Scanning;
@@ -311,14 +315,30 @@ fn parse_struct_conf_row(tokens: &[String], col_map: &HashMap<String, usize>) ->
     }
 
     // Use auth fields first, fall back to label fields
-    let beg_chain = get_cif_field(tokens, col_map,
-        "_struct_conf.beg_auth_asym_id", "_struct_conf.beg_label_asym_id")?;
-    let end_chain = get_cif_field(tokens, col_map,
-        "_struct_conf.end_auth_asym_id", "_struct_conf.end_label_asym_id")?;
-    let beg_seq_str = get_cif_field(tokens, col_map,
-        "_struct_conf.beg_auth_seq_id", "_struct_conf.beg_label_seq_id")?;
-    let end_seq_str = get_cif_field(tokens, col_map,
-        "_struct_conf.end_auth_seq_id", "_struct_conf.end_label_seq_id")?;
+    let beg_chain = get_cif_field(
+        tokens,
+        col_map,
+        "_struct_conf.beg_auth_asym_id",
+        "_struct_conf.beg_label_asym_id",
+    )?;
+    let end_chain = get_cif_field(
+        tokens,
+        col_map,
+        "_struct_conf.end_auth_asym_id",
+        "_struct_conf.end_label_asym_id",
+    )?;
+    let beg_seq_str = get_cif_field(
+        tokens,
+        col_map,
+        "_struct_conf.beg_auth_seq_id",
+        "_struct_conf.beg_label_seq_id",
+    )?;
+    let end_seq_str = get_cif_field(
+        tokens,
+        col_map,
+        "_struct_conf.end_auth_seq_id",
+        "_struct_conf.end_label_seq_id",
+    )?;
 
     if beg_chain != end_chain {
         return None;
@@ -337,14 +357,30 @@ fn parse_struct_conf_row(tokens: &[String], col_map: &HashMap<String, usize>) ->
 
 /// Parse a single data row from the _struct_sheet_range loop into an SSRange (sheet).
 fn parse_sheet_range_row(tokens: &[String], col_map: &HashMap<String, usize>) -> Option<SSRange> {
-    let beg_chain = get_cif_field(tokens, col_map,
-        "_struct_sheet_range.beg_auth_asym_id", "_struct_sheet_range.beg_label_asym_id")?;
-    let end_chain = get_cif_field(tokens, col_map,
-        "_struct_sheet_range.end_auth_asym_id", "_struct_sheet_range.end_label_asym_id")?;
-    let beg_seq_str = get_cif_field(tokens, col_map,
-        "_struct_sheet_range.beg_auth_seq_id", "_struct_sheet_range.beg_label_seq_id")?;
-    let end_seq_str = get_cif_field(tokens, col_map,
-        "_struct_sheet_range.end_auth_seq_id", "_struct_sheet_range.end_label_seq_id")?;
+    let beg_chain = get_cif_field(
+        tokens,
+        col_map,
+        "_struct_sheet_range.beg_auth_asym_id",
+        "_struct_sheet_range.beg_label_asym_id",
+    )?;
+    let end_chain = get_cif_field(
+        tokens,
+        col_map,
+        "_struct_sheet_range.end_auth_asym_id",
+        "_struct_sheet_range.end_label_asym_id",
+    )?;
+    let beg_seq_str = get_cif_field(
+        tokens,
+        col_map,
+        "_struct_sheet_range.beg_auth_seq_id",
+        "_struct_sheet_range.beg_label_seq_id",
+    )?;
+    let end_seq_str = get_cif_field(
+        tokens,
+        col_map,
+        "_struct_sheet_range.end_auth_seq_id",
+        "_struct_sheet_range.end_label_seq_id",
+    )?;
 
     if beg_chain != end_chain {
         return None;
@@ -395,7 +431,9 @@ mod tests {
 
     #[test]
     fn test_tokenize_cif_line_basic() {
-        let tokens = tokenize_cif_line("HELX_P HELX_P1 1 GLY A 4   ? HIS A 15  ? GLY L 4   HIS L 15  1 ? 12");
+        let tokens = tokenize_cif_line(
+            "HELX_P HELX_P1 1 GLY A 4   ? HIS A 15  ? GLY L 4   HIS L 15  1 ? 12",
+        );
         assert_eq!(tokens[0], "HELX_P");
         assert_eq!(tokens[1], "HELX_P1");
         assert_eq!(tokens[2], "1");
@@ -422,20 +460,38 @@ mod tests {
         let ranges = parse_cif_ss_records(path);
 
         // 1ZVH.cif has 9 HELX_P records and 17 sheet range records
-        let helix_count = ranges.iter().filter(|r| r.ss_type == SecondaryStructure::Helix).count();
-        let sheet_count = ranges.iter().filter(|r| r.ss_type == SecondaryStructure::Sheet).count();
+        let helix_count = ranges
+            .iter()
+            .filter(|r| r.ss_type == SecondaryStructure::Helix)
+            .count();
+        let sheet_count = ranges
+            .iter()
+            .filter(|r| r.ss_type == SecondaryStructure::Sheet)
+            .count();
 
-        assert_eq!(helix_count, 9, "Expected 9 helix ranges, got {}", helix_count);
-        assert_eq!(sheet_count, 17, "Expected 17 sheet ranges, got {}", sheet_count);
+        assert_eq!(
+            helix_count, 9,
+            "Expected 9 helix ranges, got {}",
+            helix_count
+        );
+        assert_eq!(
+            sheet_count, 17,
+            "Expected 17 sheet ranges, got {}",
+            sheet_count
+        );
 
         // Check first helix: chain L, residues 4-15
-        let first_helix = ranges.iter().find(|r| r.ss_type == SecondaryStructure::Helix).unwrap();
+        let first_helix = ranges
+            .iter()
+            .find(|r| r.ss_type == SecondaryStructure::Helix)
+            .unwrap();
         assert_eq!(first_helix.chain_id, "L");
         assert_eq!(first_helix.start_seq, 4);
         assert_eq!(first_helix.end_seq, 15);
 
         // Check a helix on chain A (auth_asym_id): residues 87-91
-        let chain_a_helix = ranges.iter()
+        let chain_a_helix = ranges
+            .iter()
             .find(|r| r.ss_type == SecondaryStructure::Helix && r.chain_id == "A")
             .unwrap();
         assert_eq!(chain_a_helix.start_seq, 87);
@@ -444,7 +500,7 @@ mod tests {
 
     #[test]
     fn test_assign_from_cif_file_sets_secondary_structure() {
-        use crate::model::protein::{Protein, Chain, MoleculeType, Residue, Atom};
+        use crate::model::protein::{Atom, Chain, MoleculeType, Protein, Residue};
 
         // Build a minimal protein matching 1ZVH chain L residues 1-20
         let mut residues = Vec::new();
@@ -455,7 +511,9 @@ mod tests {
                 atoms: vec![Atom {
                     name: "CA".to_string(),
                     element: "C".to_string(),
-                    x: 0.0, y: 0.0, z: 0.0,
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
                     b_factor: 0.0,
                     is_backbone: true,
                 }],
@@ -464,7 +522,11 @@ mod tests {
         }
         let mut protein = Protein {
             name: "test".to_string(),
-            chains: vec![Chain { id: "L".to_string(), residues, molecule_type: MoleculeType::Protein }],
+            chains: vec![Chain {
+                id: "L".to_string(),
+                residues,
+                molecule_type: MoleculeType::Protein,
+            }],
         };
 
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/1ZVH.cif");
@@ -472,22 +534,52 @@ mod tests {
 
         let chain = &protein.chains[0];
         // Residues 1-3 should be Coil
-        assert_eq!(chain.residues[0].secondary_structure, SecondaryStructure::Coil); // res 1
-        assert_eq!(chain.residues[1].secondary_structure, SecondaryStructure::Coil); // res 2
-        assert_eq!(chain.residues[2].secondary_structure, SecondaryStructure::Coil); // res 3
+        assert_eq!(
+            chain.residues[0].secondary_structure,
+            SecondaryStructure::Coil
+        ); // res 1
+        assert_eq!(
+            chain.residues[1].secondary_structure,
+            SecondaryStructure::Coil
+        ); // res 2
+        assert_eq!(
+            chain.residues[2].secondary_structure,
+            SecondaryStructure::Coil
+        ); // res 3
 
         // Residues 4-15 should be Helix (first helix)
-        assert_eq!(chain.residues[3].secondary_structure, SecondaryStructure::Helix); // res 4
-        assert_eq!(chain.residues[14].secondary_structure, SecondaryStructure::Helix); // res 15
+        assert_eq!(
+            chain.residues[3].secondary_structure,
+            SecondaryStructure::Helix
+        ); // res 4
+        assert_eq!(
+            chain.residues[14].secondary_structure,
+            SecondaryStructure::Helix
+        ); // res 15
 
         // Residues 16-18 should be Coil (gap between helices)
-        assert_eq!(chain.residues[15].secondary_structure, SecondaryStructure::Coil); // res 16
-        assert_eq!(chain.residues[16].secondary_structure, SecondaryStructure::Coil); // res 17
-        assert_eq!(chain.residues[17].secondary_structure, SecondaryStructure::Coil); // res 18
+        assert_eq!(
+            chain.residues[15].secondary_structure,
+            SecondaryStructure::Coil
+        ); // res 16
+        assert_eq!(
+            chain.residues[16].secondary_structure,
+            SecondaryStructure::Coil
+        ); // res 17
+        assert_eq!(
+            chain.residues[17].secondary_structure,
+            SecondaryStructure::Coil
+        ); // res 18
 
         // Residues 19-20: res 19 starts helix 2 (19-23)
-        assert_eq!(chain.residues[18].secondary_structure, SecondaryStructure::Helix); // res 19
-        assert_eq!(chain.residues[19].secondary_structure, SecondaryStructure::Helix); // res 20
+        assert_eq!(
+            chain.residues[18].secondary_structure,
+            SecondaryStructure::Helix
+        ); // res 19
+        assert_eq!(
+            chain.residues[19].secondary_structure,
+            SecondaryStructure::Helix
+        ); // res 20
     }
 
     #[test]
@@ -498,22 +590,30 @@ mod tests {
         let protein = crate::parser::pdb::load_structure(path).unwrap();
 
         let total_residues = protein.residue_count();
-        let non_coil = protein.chains.iter()
+        let non_coil = protein
+            .chains
+            .iter()
             .flat_map(|c| &c.residues)
             .filter(|r| r.secondary_structure != SecondaryStructure::Coil)
             .count();
 
         assert!(total_residues > 0, "Protein should have residues");
-        assert!(non_coil > 0,
+        assert!(
+            non_coil > 0,
             "Expected some non-Coil residues after CIF SS assignment, but all {} residues are Coil",
-            total_residues);
+            total_residues
+        );
 
         // Should have both helices and sheets
-        let helix_count = protein.chains.iter()
+        let helix_count = protein
+            .chains
+            .iter()
             .flat_map(|c| &c.residues)
             .filter(|r| r.secondary_structure == SecondaryStructure::Helix)
             .count();
-        let sheet_count = protein.chains.iter()
+        let sheet_count = protein
+            .chains
+            .iter()
             .flat_map(|c| &c.residues)
             .filter(|r| r.secondary_structure == SecondaryStructure::Sheet)
             .count();

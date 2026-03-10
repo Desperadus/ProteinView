@@ -83,11 +83,7 @@ impl Framebuffer {
     ///
     /// Shading uses two-sided half-Lambert wrap lighting with an ambient term.
     /// Depth fog is handled separately via [`apply_depth_tint`] as a post-pass.
-    pub fn rasterize_triangle_depth(
-        &mut self,
-        tri: &Triangle,
-        light_dir: [f64; 3],
-    ) {
+    pub fn rasterize_triangle_depth(&mut self, tri: &Triangle, light_dir: [f64; 3]) {
         const AMBIENT: f64 = 0.55;
 
         // --- Two-sided Lambert shading with wrap lighting ---
@@ -141,12 +137,10 @@ impl Framebuffer {
                 let pf_x = px as f64 + 0.5; // pixel center
 
                 // Barycentric coordinates
-                let u =
-                    ((v1[1] - v2[1]) * (pf_x - v2[0]) + (v2[0] - v1[0]) * (pf_y - v2[1]))
-                        * inv_denom;
-                let v =
-                    ((v2[1] - v0[1]) * (pf_x - v2[0]) + (v0[0] - v2[0]) * (pf_y - v2[1]))
-                        * inv_denom;
+                let u = ((v1[1] - v2[1]) * (pf_x - v2[0]) + (v2[0] - v1[0]) * (pf_y - v2[1]))
+                    * inv_denom;
+                let v = ((v2[1] - v0[1]) * (pf_x - v2[0]) + (v0[0] - v2[0]) * (pf_y - v2[1]))
+                    * inv_denom;
                 let w = 1.0 - u - v;
 
                 // Inside test (with a tiny epsilon for edge cases)
@@ -176,8 +170,12 @@ impl Framebuffer {
         let mut z_max = f64::NEG_INFINITY;
         for &d in &self.depth {
             if d < f64::INFINITY {
-                if d < z_min { z_min = d; }
-                if d > z_max { z_max = d; }
+                if d < z_min {
+                    z_min = d;
+                }
+                if d > z_max {
+                    z_max = d;
+                }
             }
         }
 
@@ -216,8 +214,8 @@ impl Framebuffer {
         // Skip lines where both endpoints are entirely off the same side of the screen.
         let w = self.width as isize;
         let h = self.height as isize;
-        if (x0 < 0 && x1 < 0) || (x0 >= w && x1 >= w) ||
-           (y0 < 0 && y1 < 0) || (y0 >= h && y1 >= h) {
+        if (x0 < 0 && x1 < 0) || (x0 >= w && x1 >= w) || (y0 < 0 && y1 < 0) || (y0 >= h && y1 >= h)
+        {
             return;
         }
 
@@ -340,9 +338,13 @@ impl Framebuffer {
     /// callers can submit multiple concentric circles with varying z.
     pub fn draw_circle_z(&mut self, cx: f64, cy: f64, z: f64, radius: f64, color: [u8; 3]) {
         let ix_min = ((cx - radius).floor() as isize).max(0) as usize;
-        let ix_max = ((cx + radius).ceil() as isize).max(0).min(self.width as isize - 1) as usize;
+        let ix_max = ((cx + radius).ceil() as isize)
+            .max(0)
+            .min(self.width as isize - 1) as usize;
         let iy_min = ((cy - radius).floor() as isize).max(0) as usize;
-        let iy_max = ((cy + radius).ceil() as isize).max(0).min(self.height as isize - 1) as usize;
+        let iy_max = ((cy + radius).ceil() as isize)
+            .max(0)
+            .min(self.height as isize - 1) as usize;
 
         // Circle entirely off-screen
         if ix_min > ix_max || iy_min > iy_max {
@@ -443,23 +445,28 @@ pub fn framebuffer_to_widget(fb: &Framebuffer) -> Paragraph<'static> {
         // Case 2: top only → '▀' with fg=top, bg=Reset
         // Case 3: bottom only → '▄' with fg=bottom, bg=Reset
         #[derive(PartialEq, Clone, Copy)]
-        enum CellKind { Blank, Both([u8;3],[u8;3]), TopOnly([u8;3]), BotOnly([u8;3]) }
+        enum CellKind {
+            Blank,
+            Both([u8; 3], [u8; 3]),
+            TopOnly([u8; 3]),
+            BotOnly([u8; 3]),
+        }
 
         let mut run_text = String::new();
         let mut run_kind = CellKind::Blank;
         let mut run_started = false;
 
         let flush = |spans: &mut Vec<Span<'static>>, text: &str, kind: &CellKind| {
-            if text.is_empty() { return; }
+            if text.is_empty() {
+                return;
+            }
             let style = match kind {
                 CellKind::Blank => Style::default(),
                 CellKind::Both(top, bot) => Style::default()
                     .fg(Color::Rgb(top[0], top[1], top[2]))
                     .bg(Color::Rgb(bot[0], bot[1], bot[2])),
-                CellKind::TopOnly(top) => Style::default()
-                    .fg(Color::Rgb(top[0], top[1], top[2])),
-                CellKind::BotOnly(bot) => Style::default()
-                    .fg(Color::Rgb(bot[0], bot[1], bot[2])),
+                CellKind::TopOnly(top) => Style::default().fg(Color::Rgb(top[0], top[1], top[2])),
+                CellKind::BotOnly(bot) => Style::default().fg(Color::Rgb(bot[0], bot[1], bot[2])),
             };
             spans.push(Span::styled(text.to_string(), style));
         };
@@ -563,17 +570,16 @@ pub fn framebuffer_to_braille_widget(fb: &Framebuffer) -> Paragraph<'static> {
         let mut run_color: Option<[u8; 3]> = None;
         let mut run_started = false;
 
-        let flush =
-            |spans: &mut Vec<Span<'static>>, text: &str, color: &Option<[u8; 3]>| {
-                if text.is_empty() {
-                    return;
-                }
-                let style = match color {
-                    Some(c) => Style::default().fg(Color::Rgb(c[0], c[1], c[2])),
-                    None => Style::default(),
-                };
-                spans.push(Span::styled(text.to_string(), style));
+        let flush = |spans: &mut Vec<Span<'static>>, text: &str, color: &Option<[u8; 3]>| {
+            if text.is_empty() {
+                return;
+            }
+            let style = match color {
+                Some(c) => Style::default().fg(Color::Rgb(c[0], c[1], c[2])),
+                None => Style::default(),
             };
+            spans.push(Span::styled(text.to_string(), style));
+        };
 
         for tc in 0..term_cols {
             let px_base = tc * 2;
@@ -632,8 +638,7 @@ pub fn framebuffer_to_braille_widget(fb: &Framebuffer) -> Paragraph<'static> {
                 );
                 let cell_color = Some(avg);
 
-                let braille_char =
-                    char::from_u32(0x2800u32 + bits as u32).unwrap_or(' ');
+                let braille_char = char::from_u32(0x2800u32 + bits as u32).unwrap_or(' ');
 
                 if run_started && run_color == cell_color {
                     run_text.push(braille_char);
@@ -792,10 +797,18 @@ mod tests {
         assert_eq!(quantize_channel(128, 8), 128);
         // 255 should quantize to a valid u8 (256 clamped to 255)
         let q255 = quantize_channel(255, 8);
-        assert!(q255 == 248 || q255 == 255, "unexpected quantize(255, 8): {}", q255);
+        assert!(
+            q255 == 248 || q255 == 255,
+            "unexpected quantize(255, 8): {}",
+            q255
+        );
         // 252 should round up to 248 or be clamped
         let q252 = quantize_channel(252, 8);
-        assert!(q252 == 248 || q252 == 255, "unexpected quantize(252, 8): {}", q252);
+        assert!(
+            q252 == 248 || q252 == 255,
+            "unexpected quantize(252, 8): {}",
+            q252
+        );
     }
 
     #[test]
@@ -836,14 +849,21 @@ mod tests {
         fb.apply_depth_tint(fog, 0.5);
 
         // Near pixel (z=1, t=0.0) should stay unchanged
-        assert_eq!(fb.color[0], near_color, "nearest pixel should keep original color");
+        assert_eq!(
+            fb.color[0], near_color,
+            "nearest pixel should keep original color"
+        );
 
         // Far pixel (z=10, t=1.0) should be blended halfway toward fog
         // new = base + (fog - base) * 1.0 * 0.5
         // R: 200 + (40 - 200) * 0.5 = 200 - 80 = 120
         // G: 100 + (50 - 100) * 0.5 = 100 - 25 = 75
         // B:  50 + (70 -  50) * 0.5 =  50 + 10 = 60
-        assert_eq!(fb.color[1], [120, 75, 60], "farthest pixel should blend toward fog");
+        assert_eq!(
+            fb.color[1],
+            [120, 75, 60],
+            "farthest pixel should blend toward fog"
+        );
     }
 
     #[test]
@@ -859,7 +879,15 @@ mod tests {
         fb.apply_depth_tint([40, 50, 70], 0.5);
 
         // Background pixels must remain [0,0,0]
-        assert_eq!(fb.color[2], [0, 0, 0], "background pixel at index 2 should stay black");
-        assert_eq!(fb.color[3], [0, 0, 0], "background pixel at index 3 should stay black");
+        assert_eq!(
+            fb.color[2],
+            [0, 0, 0],
+            "background pixel at index 2 should stay black"
+        );
+        assert_eq!(
+            fb.color[3],
+            [0, 0, 0],
+            "background pixel at index 3 should stay black"
+        );
     }
 }

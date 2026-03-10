@@ -1,10 +1,10 @@
 use ratatui_image::picker::Picker;
 
-use crate::model::interface::{analyze_interface, InterfaceAnalysis};
+use crate::model::interface::{InterfaceAnalysis, analyze_interface};
 use crate::model::protein::Protein;
 use crate::render::camera::Camera;
 use crate::render::color::{ColorScheme, ColorSchemeType};
-use crate::render::ribbon::{generate_ribbon_mesh, RibbonTriangle};
+use crate::render::ribbon::{RibbonTriangle, generate_ribbon_mesh};
 
 /// Visualization mode
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -52,7 +52,13 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(mut protein: Protein, hd_mode: bool, term_cols: u16, term_rows: u16, picker: Picker) -> Self {
+    pub fn new(
+        mut protein: Protein,
+        hd_mode: bool,
+        term_cols: u16,
+        term_rows: u16,
+        picker: Picker,
+    ) -> Self {
         protein.center();
         let total_residues = protein.residue_count();
         let radius = protein.bounding_radius().max(1.0);
@@ -130,10 +136,8 @@ impl App {
         if self.show_interface {
             self.rebuild_interface_colors();
         } else {
-            self.color_scheme = ColorScheme::new(
-                ColorSchemeType::Structure,
-                self.protein.residue_count(),
-            );
+            self.color_scheme =
+                ColorScheme::new(ColorSchemeType::Structure, self.protein.residue_count());
             self.mesh_dirty = true;
         }
     }

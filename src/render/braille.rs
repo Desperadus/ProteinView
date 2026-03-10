@@ -43,10 +43,7 @@ fn draw_thick_line(
 /// Check whether two atoms are bonded in 3D space.
 /// Returns true if they are in the same residue and within 1.9 Angstroms,
 /// or if they form a peptide bond (C of residue i to N of residue i+1 in same chain).
-fn atoms_bonded_3d(
-    a1_x: f64, a1_y: f64, a1_z: f64,
-    a2_x: f64, a2_y: f64, a2_z: f64,
-) -> bool {
+fn atoms_bonded_3d(a1_x: f64, a1_y: f64, a1_z: f64, a2_x: f64, a2_y: f64, a2_z: f64) -> bool {
     let dx = a2_x - a1_x;
     let dy = a2_y - a1_y;
     let dz = a2_z - a1_z;
@@ -70,14 +67,12 @@ pub fn render_protein<'a>(
         .marker(Marker::Braille)
         .x_bounds([-width / 2.0, width / 2.0])
         .y_bounds([-height / 2.0, height / 2.0])
-        .paint(move |ctx| {
-            match viz_mode {
-                VizMode::Backbone | VizMode::Cartoon => {
-                    render_backbone(ctx, protein, camera, color_scheme);
-                }
-                VizMode::Wireframe => {
-                    render_wireframe(ctx, protein, camera, color_scheme);
-                }
+        .paint(move |ctx| match viz_mode {
+            VizMode::Backbone | VizMode::Cartoon => {
+                render_backbone(ctx, protein, camera, color_scheme);
+            }
+            VizMode::Wireframe => {
+                render_wireframe(ctx, protein, camera, color_scheme);
             }
         })
 }
@@ -90,7 +85,9 @@ fn render_backbone(
     color_scheme: &ColorScheme,
 ) {
     let backbone = protein.backbone_atoms();
-    if backbone.is_empty() { return; }
+    if backbone.is_empty() {
+        return;
+    }
 
     // Perpendicular offsets: centre line + 2 offsets on each side
     let offsets: [f64; 5] = [0.0, 0.3, -0.3, 0.6, -0.6];
@@ -127,10 +124,14 @@ fn render_wireframe(
         for residue in &chain.residues {
             let atom_count = residue.atoms.len();
             // Project all atoms in this residue
-            let projected: Vec<_> = residue.atoms.iter().map(|a| {
-                let proj = camera.project(a.x, a.y, a.z);
-                (a, proj)
-            }).collect();
+            let projected: Vec<_> = residue
+                .atoms
+                .iter()
+                .map(|a| {
+                    let proj = camera.project(a.x, a.y, a.z);
+                    (a, proj)
+                })
+                .collect();
 
             // Intra-residue bonds: check all atom pairs within the residue
             for i in 0..atom_count {

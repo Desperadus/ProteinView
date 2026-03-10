@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
-use ratatui::style::Color;
 use crate::model::interface::InterfaceAnalysis;
 use crate::model::protein::{Atom, Chain, Residue, SecondaryStructure};
+use ratatui::style::Color;
 
 /// Available color schemes
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -67,7 +67,9 @@ impl ColorScheme {
         analysis: &InterfaceAnalysis,
         protein: &crate::model::protein::Protein,
     ) -> Self {
-        let focus_chain_id = protein.chains.get(focus_chain)
+        let focus_chain_id = protein
+            .chains
+            .get(focus_chain)
             .map(|c| c.id.clone())
             .unwrap_or_default();
         Self {
@@ -106,15 +108,16 @@ impl ColorScheme {
     ///   - Interface residues: bright orange
     ///   - Non-interface: dim gray-brown
     fn interface_color(&self, residue: &Residue, chain: &Chain) -> Color {
-        let is_contact = self.interface_residues_by_id
+        let is_contact = self
+            .interface_residues_by_id
             .contains(&(chain.id.clone(), residue.seq_num));
         let is_focus = chain.id == self.focus_chain_id;
 
         match (is_focus, is_contact) {
-            (true, true) => Color::Rgb(0, 255, 100),    // Bright green — antibody interface
-            (true, false) => Color::Rgb(40, 100, 60),   // Dim green — antibody non-interface
-            (false, true) => Color::Rgb(255, 165, 0),   // Bright orange — antigen interface
-            (false, false) => Color::Rgb(100, 80, 60),  // Dim brown — antigen non-interface
+            (true, true) => Color::Rgb(0, 255, 100), // Bright green — antibody interface
+            (true, false) => Color::Rgb(40, 100, 60), // Dim green — antibody non-interface
+            (false, true) => Color::Rgb(255, 165, 0), // Bright orange — antigen interface
+            (false, false) => Color::Rgb(100, 80, 60), // Dim brown — antigen non-interface
         }
     }
 
@@ -141,8 +144,8 @@ impl ColorScheme {
         match residue.secondary_structure {
             SecondaryStructure::Helix => Color::Rgb(255, 0, 128),
             SecondaryStructure::Sheet => Color::Rgb(255, 200, 0),
-            SecondaryStructure::Turn  => Color::Rgb(96, 128, 255),
-            SecondaryStructure::Coil  => Color::Rgb(0, 204, 0),
+            SecondaryStructure::Turn => Color::Rgb(96, 128, 255),
+            SecondaryStructure::Coil => Color::Rgb(0, 204, 0),
         }
     }
 
@@ -174,7 +177,9 @@ impl ColorScheme {
     }
 
     fn rainbow_color(&self, residue: &Residue) -> Color {
-        if self.total_residues == 0 { return Color::White; }
+        if self.total_residues == 0 {
+            return Color::White;
+        }
         let t = residue.seq_num as f64 / self.total_residues as f64;
         let hue = (1.0 - t) * 300.0;
         let (r, g, b) = hsv_to_rgb(hue, 1.0, 1.0);
@@ -185,12 +190,12 @@ impl ColorScheme {
 /// Returns a base-type color for nucleotide residues, or `None` for non-nucleotides.
 fn nucleotide_base_color(name: &str) -> Option<Color> {
     match name {
-        "A" | "DA" | "AMP" => Some(Color::Rgb(220, 60, 60)),   // Adenine — red
-        "U" | "UMP"        => Some(Color::Rgb(60, 60, 220)),   // Uracil — blue
-        "T" | "DT"         => Some(Color::Rgb(60, 60, 220)),   // Thymine — blue
-        "G" | "DG" | "GMP" => Some(Color::Rgb(60, 180, 60)),   // Guanine — green
-        "C" | "DC" | "CMP" => Some(Color::Rgb(220, 200, 40)),  // Cytosine — yellow
-        "I" | "DI"         => Some(Color::Rgb(150, 100, 180)), // Inosine — purple
+        "A" | "DA" | "AMP" => Some(Color::Rgb(220, 60, 60)), // Adenine — red
+        "U" | "UMP" => Some(Color::Rgb(60, 60, 220)),        // Uracil — blue
+        "T" | "DT" => Some(Color::Rgb(60, 60, 220)),         // Thymine — blue
+        "G" | "DG" | "GMP" => Some(Color::Rgb(60, 180, 60)), // Guanine — green
+        "C" | "DC" | "CMP" => Some(Color::Rgb(220, 200, 40)), // Cytosine — yellow
+        "I" | "DI" => Some(Color::Rgb(150, 100, 180)),       // Inosine — purple
         _ => None,
     }
 }
@@ -218,13 +223,17 @@ fn hsv_to_rgb(h: f64, s: f64, v: f64) -> (u8, u8, u8) {
         240..=299 => (x, 0.0, c),
         _ => (c, 0.0, x),
     };
-    (((r + m) * 255.0) as u8, ((g + m) * 255.0) as u8, ((b + m) * 255.0) as u8)
+    (
+        ((r + m) * 255.0) as u8,
+        ((g + m) * 255.0) as u8,
+        ((b + m) * 255.0) as u8,
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::protein::{is_nucleotide, Residue, SecondaryStructure};
+    use crate::model::protein::{Residue, SecondaryStructure, is_nucleotide};
 
     /// Build a minimal residue for testing color assignment.
     fn make_residue(name: &str, ss: SecondaryStructure) -> Residue {
@@ -241,28 +250,40 @@ mod tests {
     #[test]
     fn is_nucleotide_rna_bases() {
         for name in &["A", "U", "G", "C"] {
-            assert!(is_nucleotide(name), "{name} should be recognized as nucleotide");
+            assert!(
+                is_nucleotide(name),
+                "{name} should be recognized as nucleotide"
+            );
         }
     }
 
     #[test]
     fn is_nucleotide_dna_bases() {
         for name in &["DA", "DT", "DG", "DC"] {
-            assert!(is_nucleotide(name), "{name} should be recognized as nucleotide");
+            assert!(
+                is_nucleotide(name),
+                "{name} should be recognized as nucleotide"
+            );
         }
     }
 
     #[test]
     fn is_nucleotide_modified_forms() {
         for name in &["AMP", "UMP", "GMP", "CMP"] {
-            assert!(is_nucleotide(name), "{name} should be recognized as nucleotide");
+            assert!(
+                is_nucleotide(name),
+                "{name} should be recognized as nucleotide"
+            );
         }
     }
 
     #[test]
     fn is_nucleotide_rejects_amino_acids() {
         for name in &["ALA", "GLY", "CYS", "THR", "TRP", "LEU"] {
-            assert!(!is_nucleotide(name), "{name} should NOT be recognized as nucleotide");
+            assert!(
+                !is_nucleotide(name),
+                "{name} should NOT be recognized as nucleotide"
+            );
         }
     }
 
@@ -275,7 +296,11 @@ mod tests {
 
         for name in &["A", "DA", "AMP"] {
             let r = make_residue(name, SecondaryStructure::Coil);
-            assert_eq!(scheme.structure_color(&r), expected, "Adenine variant {name}");
+            assert_eq!(
+                scheme.structure_color(&r),
+                expected,
+                "Adenine variant {name}"
+            );
         }
     }
 
@@ -286,7 +311,11 @@ mod tests {
 
         for name in &["U", "UMP"] {
             let r = make_residue(name, SecondaryStructure::Coil);
-            assert_eq!(scheme.structure_color(&r), expected, "Uracil variant {name}");
+            assert_eq!(
+                scheme.structure_color(&r),
+                expected,
+                "Uracil variant {name}"
+            );
         }
     }
 
@@ -297,7 +326,11 @@ mod tests {
 
         for name in &["T", "DT"] {
             let r = make_residue(name, SecondaryStructure::Coil);
-            assert_eq!(scheme.structure_color(&r), expected, "Thymine variant {name}");
+            assert_eq!(
+                scheme.structure_color(&r),
+                expected,
+                "Thymine variant {name}"
+            );
         }
     }
 
@@ -308,7 +341,11 @@ mod tests {
 
         for name in &["G", "DG", "GMP"] {
             let r = make_residue(name, SecondaryStructure::Coil);
-            assert_eq!(scheme.structure_color(&r), expected, "Guanine variant {name}");
+            assert_eq!(
+                scheme.structure_color(&r),
+                expected,
+                "Guanine variant {name}"
+            );
         }
     }
 
@@ -319,7 +356,11 @@ mod tests {
 
         for name in &["C", "DC", "CMP"] {
             let r = make_residue(name, SecondaryStructure::Coil);
-            assert_eq!(scheme.structure_color(&r), expected, "Cytosine variant {name}");
+            assert_eq!(
+                scheme.structure_color(&r),
+                expected,
+                "Cytosine variant {name}"
+            );
         }
     }
 
@@ -330,7 +371,11 @@ mod tests {
 
         for name in &["I", "DI"] {
             let r = make_residue(name, SecondaryStructure::Coil);
-            assert_eq!(scheme.structure_color(&r), expected, "Inosine variant {name}");
+            assert_eq!(
+                scheme.structure_color(&r),
+                expected,
+                "Inosine variant {name}"
+            );
         }
     }
 

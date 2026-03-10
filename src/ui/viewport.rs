@@ -1,6 +1,6 @@
 use image::DynamicImage;
-use ratatui::layout::Rect;
 use ratatui::Frame;
+use ratatui::layout::Rect;
 use ratatui_image::picker::ProtocolType;
 use ratatui_image::{Image, Resize};
 
@@ -48,10 +48,7 @@ fn render_hd_viewport(frame: &mut Frame, area: Rect, app: &App) {
             area.height as f64 * font_h as f64,
         )
     } else {
-        (
-            area.width as f64 * 2.0,
-            area.height as f64 * 4.0,
-        )
+        (area.width as f64 * 2.0, area.height as f64 * 4.0)
     };
 
     // Rasterize the 3D scene into our software framebuffer.

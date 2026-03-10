@@ -1,6 +1,6 @@
-pub mod camera;
 pub mod braille;
-pub mod hd;
-pub mod framebuffer;
+pub mod camera;
 pub mod color;
+pub mod framebuffer;
+pub mod hd;
 pub mod ribbon;
