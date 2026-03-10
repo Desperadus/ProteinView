@@ -7,6 +7,7 @@ pub struct Camera {
     pub zoom: f64,
     pub pan_x: f64,
     pub pan_y: f64,
+    pivot: [f64; 3],
     pub auto_rotate: bool,
     last_tick: Instant,
 }
@@ -18,6 +19,7 @@ impl Default for Camera {
             zoom: 1.0,
             pan_x: 0.0,
             pan_y: 0.0,
+            pivot: [0.0, 0.0, 0.0],
             auto_rotate: false,
             last_tick: Instant::now(),
         }
@@ -56,6 +58,9 @@ impl Camera {
         self.pan_x += dx * Self::PAN_STEP;
         self.pan_y += dy * Self::PAN_STEP;
     }
+    pub fn set_pivot(&mut self, pivot: [f64; 3]) {
+        self.pivot = pivot;
+    }
     pub fn reset(&mut self) {
         *self = Self::default();
     }
@@ -83,7 +88,8 @@ impl Camera {
 
     /// Project a 3D point to 2D using the current camera orientation + orthographic projection.
     pub fn project(&self, x: f64, y: f64, z: f64) -> Projected {
-        let [x_view, y_view, z_view] = self.rotate_vector(x, y, z);
+        let [x_view, y_view, z_view] =
+            self.rotate_vector(x - self.pivot[0], y - self.pivot[1], z - self.pivot[2]);
 
         // Apply zoom and pan (orthographic projection)
         Projected {
@@ -167,5 +173,15 @@ mod tests {
         );
 
         assert_close(rotated, expected);
+    }
+
+    #[test]
+    fn project_uses_pivot_as_rotation_center() {
+        let mut camera = Camera::default();
+        camera.set_pivot([5.0, 0.0, 0.0]);
+
+        let projected = camera.project(6.0, 0.0, 0.0);
+        assert!((projected.x - 1.0).abs() < 1e-9);
+        assert!(projected.y.abs() < 1e-9);
     }
 }

@@ -177,7 +177,7 @@ fn main() -> Result<()> {
                 KeyCode::Char('s') => app.camera.pan(0.0, -1.0),
                 KeyCode::Char('a') => app.camera.pan(-1.0, 0.0),
                 KeyCode::Char('d') => app.camera.pan(1.0, 0.0),
-                KeyCode::Char('r') => app.camera.reset(),
+                KeyCode::Char('r') => app.reset_camera(),
                 KeyCode::Char('c') => app.cycle_color(),
                 KeyCode::Char('v') => app.cycle_viz_mode(),
                 KeyCode::Char('m') => {

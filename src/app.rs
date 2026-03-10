@@ -116,6 +116,57 @@ impl App {
         }
     }
 
+    fn atomic_mass(element: &str) -> f64 {
+        match element.trim().to_ascii_uppercase().as_str() {
+            "H" => 1.008,
+            "C" => 12.011,
+            "N" => 14.007,
+            "O" => 15.999,
+            "P" => 30.974,
+            "S" => 32.06,
+            _ => 12.0,
+        }
+    }
+
+    fn interface_pivot_for_chain(&self, chain_idx: usize) -> Option<[f64; 3]> {
+        let mut mx = 0.0;
+        let mut my = 0.0;
+        let mut mz = 0.0;
+        let mut m_total = 0.0;
+
+        for &(ci, ri) in &self.interface_analysis.interface_residues {
+            if ci != chain_idx {
+                continue;
+            }
+            let residue = self.protein.chains.get(ci)?.residues.get(ri)?;
+            for atom in &residue.atoms {
+                let mass = Self::atomic_mass(&atom.element);
+                mx += atom.x * mass;
+                my += atom.y * mass;
+                mz += atom.z * mass;
+                m_total += mass;
+            }
+        }
+
+        if m_total > 0.0 {
+            Some([mx / m_total, my / m_total, mz / m_total])
+        } else {
+            None
+        }
+    }
+
+    fn refresh_interface_pivot(&mut self) {
+        if !self.show_interface {
+            self.camera.set_pivot([0.0, 0.0, 0.0]);
+            return;
+        }
+        if let Some(pivot) = self.interface_pivot_for_chain(self.current_chain) {
+            self.camera.set_pivot(pivot);
+        } else {
+            self.camera.set_pivot([0.0, 0.0, 0.0]);
+        }
+    }
+
     pub fn cycle_color(&mut self) {
         let next = self.color_scheme.scheme_type.next(self.protein.has_plddt());
         self.color_scheme = ColorScheme::new(next, self.protein.residue_count());
@@ -142,6 +193,7 @@ impl App {
             self.color_scheme =
                 ColorScheme::new(ColorSchemeType::Structure, self.protein.residue_count());
         }
+        self.refresh_interface_pivot();
     }
 
     pub fn next_chain(&mut self) {
@@ -149,6 +201,7 @@ impl App {
             self.current_chain = (self.current_chain + 1) % self.protein.chains.len();
             if self.show_interface {
                 self.rebuild_interface_colors();
+                self.refresh_interface_pivot();
             }
         }
     }
@@ -162,6 +215,7 @@ impl App {
             };
             if self.show_interface {
                 self.rebuild_interface_colors();
+                self.refresh_interface_pivot();
             }
         }
     }
@@ -172,6 +226,11 @@ impl App {
 
     pub fn tick(&mut self) {
         self.camera.tick();
+    }
+
+    pub fn reset_camera(&mut self) {
+        self.camera.reset();
+        self.refresh_interface_pivot();
     }
 
     pub fn toggle_rotation_order(&mut self) {
