@@ -58,6 +58,29 @@ pub struct App {
 }
 
 impl App {
+    fn auto_zoom_for_mode(&self, hd_mode: bool, term_cols: u16, term_rows: u16) -> f64 {
+        let radius = self.protein.bounding_radius().max(1.0);
+        let vp_rows = term_rows.saturating_sub(4) as f64;
+        let vp_cols = term_cols as f64;
+        let (font_w, font_h) = self.picker.font_size();
+        let has_graphics = hd_mode
+            && self.picker.protocol_type() != ratatui_image::picker::ProtocolType::Halfblocks
+            && font_w > 0
+            && font_h > 0;
+
+        if hd_mode {
+            let (px_w, px_h) = if has_graphics {
+                (vp_cols * font_w as f64, vp_rows * font_h as f64)
+            } else {
+                // Must match viewport.rs braille dimensions: cols*2, rows*4
+                (vp_cols * 2.0, vp_rows * 4.0)
+            };
+            0.9 * px_w.min(px_h) / (2.0 * radius)
+        } else {
+            0.9 * (vp_cols * 2.0).min(vp_rows * 4.0) / (2.0 * radius)
+        }
+    }
+
     pub fn new(
         mut protein: Protein,
         hd_mode: bool,
@@ -69,40 +92,13 @@ impl App {
     ) -> Self {
         protein.center();
         let total_residues = protein.residue_count();
-        let radius = protein.bounding_radius().max(1.0);
-        // Dynamic zoom based on actual terminal size.
-        // When a true graphics protocol (Sixel/Kitty/iTerm2) is available,
-        // we render at full pixel resolution (cols*font_w x rows*font_h)
-        // instead of the half-block resolution (cols x rows*2).  Scale the
-        // zoom factor accordingly so the protein fills the viewport.
-        let vp_rows = term_rows.saturating_sub(4) as f64;
-        let vp_cols = term_cols as f64;
-        let (font_w, font_h) = picker.font_size();
-        let has_graphics = hd_mode
-            && picker.protocol_type() != ratatui_image::picker::ProtocolType::Halfblocks
-            && font_w > 0
-            && font_h > 0;
-        let auto_zoom = if hd_mode {
-            let (px_w, px_h) = if has_graphics {
-                (vp_cols * font_w as f64, vp_rows * font_h as f64)
-            } else {
-                // Must match viewport.rs braille dimensions: cols*2, rows*4
-                (vp_cols * 2.0, vp_rows * 4.0)
-            };
-            0.9 * px_w.min(px_h) / (2.0 * radius)
-        } else {
-            0.9 * (vp_cols * 2.0).min(vp_rows * 4.0) / (2.0 * radius)
-        };
-        let mut camera = Camera::default();
-        camera.zoom = auto_zoom;
-
         // Pre-compute interface analysis (4.5A cutoff)
         let interface_analysis = analyze_interface(&protein, 4.5);
 
         let color_scheme = ColorScheme::new(initial_color, total_residues);
-        Self {
+        let mut app = Self {
             protein,
-            camera,
+            camera: Camera::default(),
             color_scheme,
             viz_mode,
             current_chain: 0,
@@ -113,7 +109,9 @@ impl App {
             invert_rotation_controls: false,
             should_quit: false,
             picker,
-        }
+        };
+        app.camera.zoom = app.auto_zoom_for_mode(app.hd_mode, term_cols, term_rows);
+        app
     }
 
     fn atomic_mass(element: &str) -> f64 {
@@ -245,28 +243,19 @@ impl App {
         }
     }
 
-    /// Recalculate the zoom factor based on current HD mode and terminal size.
-    /// Call this after toggling `hd_mode` so the protein fills the viewport
-    /// correctly for the new framebuffer dimensions.
-    pub fn recalculate_zoom(&mut self, term_cols: u16, term_rows: u16) {
-        let radius = self.protein.bounding_radius().max(1.0);
-        let vp_rows = term_rows.saturating_sub(4) as f64;
-        let vp_cols = term_cols as f64;
-        let (font_w, font_h) = self.picker.font_size();
-        let has_graphics = self.hd_mode
-            && self.picker.protocol_type() != ratatui_image::picker::ProtocolType::Halfblocks
-            && font_w > 0
-            && font_h > 0;
-        if self.hd_mode {
-            let (px_w, px_h) = if has_graphics {
-                (vp_cols * font_w as f64, vp_rows * font_h as f64)
-            } else {
-                // Must match viewport.rs braille dimensions: cols*2, rows*4
-                (vp_cols * 2.0, vp_rows * 4.0)
-            };
-            self.camera.zoom = 0.9 * px_w.min(px_h) / (2.0 * radius);
-        } else {
-            self.camera.zoom = 0.9 * (vp_cols * 2.0).min(vp_rows * 4.0) / (2.0 * radius);
+    /// Toggle HD mode while preserving the current framing.
+    /// Keeps the user's current zoom and pan proportional to the framebuffer
+    /// resolution used by each render backend.
+    pub fn toggle_hd_mode_preserve_view(&mut self, term_cols: u16, term_rows: u16) {
+        let old_auto_zoom = self.auto_zoom_for_mode(self.hd_mode, term_cols, term_rows);
+        self.hd_mode = !self.hd_mode;
+        let new_auto_zoom = self.auto_zoom_for_mode(self.hd_mode, term_cols, term_rows);
+
+        if old_auto_zoom > f64::EPSILON && new_auto_zoom > f64::EPSILON {
+            let scale = new_auto_zoom / old_auto_zoom;
+            self.camera.zoom *= scale;
+            self.camera.pan_x *= scale;
+            self.camera.pan_y *= scale;
         }
     }
 }

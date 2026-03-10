@@ -181,10 +181,9 @@ fn main() -> Result<()> {
                 KeyCode::Char('c') => app.cycle_color(),
                 KeyCode::Char('v') => app.cycle_viz_mode(),
                 KeyCode::Char('m') => {
-                    app.hd_mode = !app.hd_mode;
                     let (cols, rows) =
                         crossterm::terminal::size().unwrap_or((term_cols, term_rows));
-                    app.recalculate_zoom(cols, rows);
+                    app.toggle_hd_mode_preserve_view(cols, rows);
                 }
                 KeyCode::Char('[') => app.prev_chain(),
                 KeyCode::Char(']') => app.next_chain(),
