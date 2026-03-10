@@ -19,6 +19,7 @@ pub fn render_hd_framebuffer(
     viz_mode: VizMode,
     width: f64,
     height: f64,
+    is_hd_output: bool,
 ) -> Framebuffer {
     let px_w = width as usize;
     let px_h = height as usize;
@@ -68,8 +69,69 @@ pub fn render_hd_framebuffer(
     // based on their z-buffer depth.  This gives uniform depth cues across all
     // rendering modes (triangles, lines, circles).
     fb.apply_depth_tint([40, 50, 70], 0.35);
+    if is_hd_output && matches!(viz_mode, VizMode::Cartoon) {
+        apply_cartoon_outline(&mut fb);
+    }
 
     fb
+}
+
+/// Add a subtle dark outline around cartoon geometry in HD mode.
+///
+/// We mark a pixel as an outline if it belongs to rendered geometry and either:
+/// 1. touches background, or
+/// 2. has a noticeable depth discontinuity against an immediate neighbor.
+/// Then we darken those pixels to preserve the underlying color cues.
+fn apply_cartoon_outline(fb: &mut Framebuffer) {
+    if fb.width < 3 || fb.height < 3 {
+        return;
+    }
+
+    const DEPTH_EDGE_THRESHOLD: f64 = 0.14;
+    const DARKEN_FACTOR: f64 = 0.35;
+    let w = fb.width;
+    let h = fb.height;
+    let mut edge_mask = vec![false; w * h];
+
+    for y in 1..(h - 1) {
+        for x in 1..(w - 1) {
+            let idx = y * w + x;
+            let z = fb.depth[idx];
+            if !z.is_finite() {
+                continue;
+            }
+
+            let mut background_neighbor = false;
+            let mut depth_edge = false;
+            let neighbors = [idx - 1, idx + 1, idx - w, idx + w];
+            for nidx in neighbors {
+                let nz = fb.depth[nidx];
+                if !nz.is_finite() {
+                    background_neighbor = true;
+                    break;
+                }
+                if (z - nz).abs() > DEPTH_EDGE_THRESHOLD {
+                    depth_edge = true;
+                }
+            }
+
+            if background_neighbor || depth_edge {
+                edge_mask[idx] = true;
+            }
+        }
+    }
+
+    for (idx, is_edge) in edge_mask.into_iter().enumerate() {
+        if !is_edge {
+            continue;
+        }
+        let c = fb.color[idx];
+        fb.color[idx] = [
+            (c[0] as f64 * DARKEN_FACTOR) as u8,
+            (c[1] as f64 * DARKEN_FACTOR) as u8,
+            (c[2] as f64 * DARKEN_FACTOR) as u8,
+        ];
+    }
 }
 
 /// Apply the camera's rotation to a direction vector (no zoom/pan).
