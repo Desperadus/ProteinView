@@ -184,6 +184,16 @@ fn main() -> Result<()> {
                         crossterm::terminal::size().unwrap_or((term_cols, term_rows));
                     app.toggle_hd_mode_preserve_view(cols, rows);
                 }
+                KeyCode::Char('/') => {
+                    let (cols, rows) =
+                        crossterm::terminal::size().unwrap_or((term_cols, term_rows));
+                    let view_cols = if app.show_interface {
+                        cols.saturating_sub(ui::interface_panel::SIDEBAR_WIDTH)
+                    } else {
+                        cols
+                    };
+                    app.focus_next_chain(view_cols, rows);
+                }
                 KeyCode::Char('[') => app.prev_chain(),
                 KeyCode::Char(']') => app.next_chain(),
                 KeyCode::Char(' ') => app.camera.auto_rotate = !app.camera.auto_rotate,

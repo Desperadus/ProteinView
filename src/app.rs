@@ -57,8 +57,14 @@ pub struct App {
 }
 
 impl App {
-    fn auto_zoom_for_mode(&self, hd_mode: bool, term_cols: u16, term_rows: u16) -> f64 {
-        let radius = self.protein.bounding_radius().max(1.0);
+    fn auto_zoom_for_radius(
+        &self,
+        radius: f64,
+        hd_mode: bool,
+        term_cols: u16,
+        term_rows: u16,
+    ) -> f64 {
+        let radius = radius.max(1.0);
         let vp_rows = term_rows.saturating_sub(4) as f64;
         let vp_cols = term_cols as f64;
         let (font_w, font_h) = self.picker.font_size();
@@ -78,6 +84,15 @@ impl App {
         } else {
             0.9 * (vp_cols * 2.0).min(vp_rows * 4.0) / (2.0 * radius)
         }
+    }
+
+    fn auto_zoom_for_mode(&self, hd_mode: bool, term_cols: u16, term_rows: u16) -> f64 {
+        self.auto_zoom_for_radius(
+            self.protein.bounding_radius(),
+            hd_mode,
+            term_cols,
+            term_rows,
+        )
     }
 
     pub fn new(
@@ -151,6 +166,62 @@ impl App {
         }
     }
 
+    fn chain_center_of_mass(&self, chain_idx: usize) -> Option<[f64; 3]> {
+        let chain = self.protein.chains.get(chain_idx)?;
+        let mut mx = 0.0;
+        let mut my = 0.0;
+        let mut mz = 0.0;
+        let mut m_total = 0.0;
+
+        for residue in &chain.residues {
+            for atom in &residue.atoms {
+                let mass = Self::atomic_mass(&atom.element);
+                mx += atom.x * mass;
+                my += atom.y * mass;
+                mz += atom.z * mass;
+                m_total += mass;
+            }
+        }
+
+        if m_total > 0.0 {
+            Some([mx / m_total, my / m_total, mz / m_total])
+        } else {
+            None
+        }
+    }
+
+    fn chain_bounding_radius_from_pivot(&self, chain_idx: usize, pivot: [f64; 3]) -> Option<f64> {
+        let chain = self.protein.chains.get(chain_idx)?;
+
+        let mut max_backbone = 0.0f64;
+        let mut found_backbone = false;
+        let mut max_any = 0.0f64;
+        let mut found_any = false;
+
+        for residue in &chain.residues {
+            for atom in &residue.atoms {
+                let dx = atom.x - pivot[0];
+                let dy = atom.y - pivot[1];
+                let dz = atom.z - pivot[2];
+                let d = (dx * dx + dy * dy + dz * dz).sqrt();
+                max_any = max_any.max(d);
+                found_any = true;
+                if atom.is_backbone {
+                    max_backbone = max_backbone.max(d);
+                    found_backbone = true;
+                }
+            }
+        }
+
+        if found_backbone {
+            Some(max_backbone)
+        } else if found_any {
+            Some(max_any)
+        } else {
+            None
+        }
+    }
+
     fn refresh_interface_pivot(&mut self) {
         if !self.show_interface {
             self.camera.set_pivot([0.0, 0.0, 0.0]);
@@ -213,6 +284,33 @@ impl App {
                 self.rebuild_interface_colors();
                 self.refresh_interface_pivot();
             }
+        }
+    }
+
+    /// Global focus helper (bound to `/`): advance chain, highlight focused
+    /// chain, and fit it to the viewport using its COM and radius.
+    pub fn focus_next_chain(&mut self, term_cols: u16, term_rows: u16) {
+        if self.protein.chains.is_empty() {
+            return;
+        }
+
+        self.current_chain = (self.current_chain + 1) % self.protein.chains.len();
+        self.color_scheme = ColorScheme::new_focus_chain(
+            self.protein.residue_count(),
+            self.current_chain,
+            &self.protein,
+        );
+
+        let pivot = self
+            .chain_center_of_mass(self.current_chain)
+            .unwrap_or([0.0, 0.0, 0.0]);
+        self.camera.set_pivot(pivot);
+        self.camera.pan_x = 0.0;
+        self.camera.pan_y = 0.0;
+
+        if let Some(radius) = self.chain_bounding_radius_from_pivot(self.current_chain, pivot) {
+            self.camera.zoom =
+                self.auto_zoom_for_radius(radius, self.hd_mode, term_cols, term_rows);
         }
     }
 

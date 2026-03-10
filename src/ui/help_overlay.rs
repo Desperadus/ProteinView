@@ -64,6 +64,10 @@ pub fn render_help_overlay(frame: &mut Frame, area: Rect) {
             Span::raw("Prev / next chain"),
         ]),
         Line::from(vec![
+            Span::styled("  /          ", Style::default().fg(Color::Yellow)),
+            Span::raw("Focus next chain (highlight + fit zoom)"),
+        ]),
+        Line::from(vec![
             Span::styled("  Space      ", Style::default().fg(Color::Yellow)),
             Span::raw("Toggle auto-rotation"),
         ]),

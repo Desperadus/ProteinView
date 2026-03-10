@@ -56,7 +56,21 @@ pub fn render_helpbar(frame: &mut Frame, area: Rect) {
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(": mode  ", Style::default().fg(Color::Gray)),
+        Span::styled(": viz mode  ", Style::default().fg(Color::Gray)),
+        Span::styled(
+            "m",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(": Toggle render mode  ", Style::default().fg(Color::Gray)),
+        Span::styled(
+            "/",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(": Focus next chain  ", Style::default().fg(Color::Gray)),
         Span::styled(
             "f",
             Style::default()

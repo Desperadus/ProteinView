@@ -14,6 +14,7 @@ pub enum ColorSchemeType {
     BFactor,
     Rainbow,
     Interface,
+    Focus,
 }
 
 impl ColorSchemeType {
@@ -33,6 +34,8 @@ impl ColorSchemeType {
             Self::Rainbow => Self::Structure,
             // Interface is toggled separately, skip it in the cycle
             Self::Interface => Self::Structure,
+            // Focus is toggled via '/' and skipped in cycle
+            Self::Focus => Self::Structure,
         }
     }
 
@@ -51,6 +54,7 @@ impl ColorSchemeType {
             "bfactor" | "b-factor" => Self::BFactor,
             "rainbow" => Self::Rainbow,
             "interface" => Self::Interface,
+            "focus" => Self::Focus,
             _ => Self::Structure,
         }
     }
@@ -64,6 +68,7 @@ impl ColorSchemeType {
             Self::BFactor => "B-Factor",
             Self::Rainbow => "Rainbow",
             Self::Interface => "Interface",
+            Self::Focus => "Focus",
         }
     }
 }
@@ -73,9 +78,9 @@ impl ColorSchemeType {
 pub struct ColorScheme {
     pub scheme_type: ColorSchemeType,
     total_residues: usize,
-    /// For Interface mode: chain ID of the "focus" (antibody) chain
+    /// For Interface mode: chain ID of the focused chain.
     focus_chain_id: String,
-    /// For Interface mode: set of (chain_id, seq_num) at the interface
+    /// For Interface mode: set of (chain_id, seq_num) at the interface.
     interface_residues_by_id: HashSet<(String, i32)>,
 }
 
@@ -108,6 +113,24 @@ impl ColorScheme {
         }
     }
 
+    pub fn new_focus_chain(
+        total_residues: usize,
+        focus_chain: usize,
+        protein: &crate::model::protein::Protein,
+    ) -> Self {
+        let focus_chain_id = protein
+            .chains
+            .get(focus_chain)
+            .map(|c| c.id.clone())
+            .unwrap_or_default();
+        Self {
+            scheme_type: ColorSchemeType::Focus,
+            total_residues,
+            focus_chain_id,
+            interface_residues_by_id: HashSet::new(),
+        }
+    }
+
     /// Get color for a residue based on current scheme
     pub fn residue_color(&self, residue: &Residue, chain: &Chain) -> Color {
         match self.scheme_type {
@@ -118,6 +141,7 @@ impl ColorScheme {
             ColorSchemeType::BFactor => self.bfactor_color(residue),
             ColorSchemeType::Rainbow => self.rainbow_color(residue),
             ColorSchemeType::Interface => self.interface_color(residue, chain),
+            ColorSchemeType::Focus => self.focus_color(chain),
         }
     }
 
@@ -137,26 +161,32 @@ impl ColorScheme {
                     self.interface_color(residue, chain)
                 }
             }
+            ColorSchemeType::Focus => self.focus_color(chain),
             _ => self.residue_color(residue, chain),
         }
     }
 
     /// Interface color scheme:
-    /// - Focus chain (antibody): green tones
-    ///   - Interface residues: bright green
-    ///   - Non-interface: dim green
-    /// - Other chains (antigen): orange tones
-    ///   - Interface residues: bright orange
-    ///   - Non-interface: dim gray-brown
+    /// - Focus chain: green tones
+    /// - Other chains: orange/brown tones
+    /// - Interface residues highlighted on both sides
     fn interface_color(&self, residue: &Residue, chain: &Chain) -> Color {
         let is_contact = self.is_interface_residue(residue, chain);
         let is_focus = chain.id == self.focus_chain_id;
 
         match (is_focus, is_contact) {
-            (true, true) => Color::Rgb(0, 255, 100), // Bright green — antibody interface
-            (true, false) => Color::Rgb(40, 100, 60), // Dim green — antibody non-interface
-            (false, true) => Color::Rgb(255, 165, 0), // Bright orange — antigen interface
-            (false, false) => Color::Rgb(100, 80, 60), // Dim brown — antigen non-interface
+            (true, true) => Color::Rgb(0, 255, 100),
+            (true, false) => Color::Rgb(40, 100, 60),
+            (false, true) => Color::Rgb(255, 165, 0),
+            (false, false) => Color::Rgb(100, 80, 60),
+        }
+    }
+
+    fn focus_color(&self, chain: &Chain) -> Color {
+        if chain.id == self.focus_chain_id {
+            self.chain_color(chain)
+        } else {
+            Color::Rgb(90, 90, 90)
         }
     }
 
